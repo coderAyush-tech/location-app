@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '')
+// Kept as a built-in default so the deployed app behaves like the original HTML version.
+// An environment variable can still override it for a future backend migration.
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://locationfinder-pdzb.onrender.com').replace(/\/$/, '')
 const features = [
   ['Smart Lighting Analysis', 'AI analyzes ambient light conditions and adjusts camera settings automatically', true],
   ['Golden Hour Detection', 'Predicts perfect golden hour timing based on your location and weather', false],
