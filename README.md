@@ -13,6 +13,7 @@ A responsive React + Tailwind conversion of the original PhotoGenius AI page.
 - Precise permission granted: `POST /api/location` with `{ "latitude", "longitude" }`.
 - Precise permission denied: `POST /api/location/fallback` with no body. This uses the request IP on the Spring backend, as required by the supplied controller.
 - The deployed frontend uses `https://locationfinder-pdzb.onrender.com` by default, exactly like the original HTML version. `VITE_API_BASE_URL` is optional and only needed if the backend URL changes later.
+- API requests time out after 15 seconds so the interface never remains stuck if a backend geolocation provider is unavailable.
 
 ## GitHub Pages deployment
 

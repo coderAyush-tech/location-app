@@ -3,6 +3,7 @@ import { useCallback, useEffect, useState } from 'react'
 // Kept as a built-in default so the deployed app behaves like the original HTML version.
 // An environment variable can still override it for a future backend migration.
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://locationfinder-pdzb.onrender.com').replace(/\/$/, '')
+const API_TIMEOUT_MS = 15_000
 const features = [
   ['Smart Lighting Analysis', 'AI analyzes ambient light conditions and adjusts camera settings automatically', true],
   ['Golden Hour Detection', 'Predicts perfect golden hour timing based on your location and weather', false],
@@ -21,14 +22,30 @@ function endpoint(path) {
 }
 
 async function postLocation(path, body) {
-  const response = await fetch(endpoint(path), {
-    method: 'POST',
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  })
-  if (!response.ok) throw new Error(`Server returned ${response.status}`)
-  const text = await response.text()
-  return text ? JSON.parse(text) : null
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS)
+
+  try {
+    const response = await fetch(endpoint(path), {
+      method: 'POST',
+      headers: body ? { 'Content-Type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: controller.signal,
+    })
+    const text = await response.text()
+    let data = null
+    try { data = text ? JSON.parse(text) : null } catch { data = text }
+    if (!response.ok) {
+      const detail = typeof data === 'object' && data?.error ? data.error : `Server returned ${response.status}`
+      throw new Error(detail)
+    }
+    return data
+  } catch (error) {
+    if (error.name === 'AbortError') throw new Error('Request timed out. Please try again later.')
+    throw error
+  } finally {
+    window.clearTimeout(timeout)
+  }
 }
 
 export default function App() {
@@ -78,8 +95,8 @@ export default function App() {
       await postLocation('/api/location/fallback')
       finishWithSuccess('Location estimated from IP', 'Limited location estimate applied. Exact golden-hour timing may be less accurate.')
     } catch (error) {
-      setStatus('Fallback location service unavailable')
-      setNotice({ type: 'warning', title: 'Limited AI Features', detail: 'We could not estimate your location. You can still use the core AI features.' })
+      setStatus(`Fallback location unavailable: ${error.message}`)
+      setNotice({ type: 'warning', title: 'Limited AI Features', detail: 'IP-based location is currently unavailable. You can still use the core AI features.' })
       reset()
     }
   }
@@ -96,16 +113,24 @@ export default function App() {
       async ({ coords }) => {
         setStatus('Sending precise location securely...')
         try {
-          // Send only fields accepted by LocationCordinates on the Spring backend.
-          await postLocation('/api/location', { latitude: coords.latitude, longitude: coords.longitude })
+          // Matches the payload sent by the original HTML page, while keeping the
+          // precise latitude and longitude supplied by the browser.
+          await postLocation('/api/location', {
+            latitude: coords.latitude,
+            longitude: coords.longitude,
+            photoStyleId: 1,
+            source: 'PhotoGenius AI',
+            timestamp: new Date().toISOString(),
+            accuracy: coords.accuracy ?? null,
+          })
           finishWithSuccess('Precise location saved', 'All location-aware AI features are now enabled and ready for perfect photos.')
         } catch (error) {
           const locationData = { latitude: coords.latitude, longitude: coords.longitude, savedAt: new Date().toISOString() }
           const saved = JSON.parse(localStorage.getItem('photogenius_pending_locations') || '[]')
           localStorage.setItem('photogenius_pending_locations', JSON.stringify([...saved, locationData]))
           reset()
-          setStatus('Server unavailable — location saved locally')
-          setNotice({ type: 'warning', title: 'Saved locally', detail: 'Your precise location will be available locally until the backend is reachable.' })
+          setStatus(`Location not accepted by server: ${error.message}`)
+          setNotice({ type: 'warning', title: 'Saved locally', detail: 'The backend did not accept the location. It has been saved on this device until the API is available.' })
         }
       },
       async (error) => {
