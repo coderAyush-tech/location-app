@@ -9,6 +9,11 @@
 html { background: #0f0c29; }
 body { margin: 0; min-width: 320px; }
 button { font: inherit; }
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid #fb7185;
+  outline-offset: 3px;
+}
 
 .float-shape {
   position: absolute;
@@ -31,6 +36,66 @@ button { font: inherit; }
 }
 .control-button:hover:not(:disabled) { transform: scale(1.08); background: rgb(255 255 255 / 0.2); }
 .control-button:disabled { opacity: .6; cursor: not-allowed; }
+
+.session-button-primary,
+.session-button-secondary {
+  min-height: 2.875rem;
+  border-radius: 9999px;
+  padding: .7rem 1.3rem;
+  font-size: .875rem;
+  font-weight: 600;
+  transition: transform 150ms ease, background-color 150ms ease, border-color 150ms ease;
+}
+
+.session-button-primary {
+  border: 1px solid rgb(251 113 133 / .7);
+  background: #f43f5e;
+  color: white;
+  box-shadow: 0 10px 25px rgb(244 63 94 / .18);
+}
+
+.session-button-secondary {
+  border: 1px solid rgb(255 255 255 / .14);
+  background: rgb(255 255 255 / .055);
+  color: #e2e8f0;
+}
+
+.session-button-primary:hover:not(:disabled),
+.session-button-secondary:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.session-button-primary:hover:not(:disabled) { background: #e11d48; }
+.session-button-secondary:hover:not(:disabled) { background: rgb(255 255 255 / .1); }
+.session-button-primary:disabled,
+.session-button-secondary:disabled { cursor: not-allowed; opacity: .55; }
+
+.comparison-range {
+  height: .35rem;
+  cursor: ew-resize;
+  appearance: none;
+  border-radius: 9999px;
+  background: rgb(255 255 255 / .14);
+}
+
+.comparison-range::-webkit-slider-thumb {
+  width: 1.25rem;
+  height: 1.25rem;
+  appearance: none;
+  border: 3px solid #11131a;
+  border-radius: 9999px;
+  background: #fb7185;
+  box-shadow: 0 0 0 2px rgb(251 113 133 / .28);
+}
+
+.comparison-range::-moz-range-thumb {
+  width: 1rem;
+  height: 1rem;
+  border: 3px solid #11131a;
+  border-radius: 9999px;
+  background: #fb7185;
+  box-shadow: 0 0 0 2px rgb(251 113 133 / .28);
+}
 
 @keyframes float {
   0%, 100% { transform: translate(0, 0) rotate(0); }

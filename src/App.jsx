@@ -1,150 +1,27 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
+import PhotoSessionFlow from './features/photoSession/PhotoSessionFlow'
 
-// Kept as a built-in default so the deployed app behaves like the original HTML version.
-// An environment variable can still override it for a future backend migration.
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL || 'https://locationfinder-pdzb.onrender.com').replace(/\/$/, '')
-const API_TIMEOUT_MS = 15_000
 const features = [
   ['Smart Lighting Analysis', 'AI analyzes ambient light conditions and adjusts camera settings automatically', true],
   ['Golden Hour Detection', 'Predicts perfect golden hour timing based on your location and weather', false],
   ['Composition Assistant', 'Real-time feedback on framing, rule of thirds, and balance', true],
   ['Weather Integration', 'Uses local weather data to recommend optimal shooting conditions', false],
 ]
-const steps = [
-  ['🧠', 'Initializing Neural Network', 'Loading AI models for scene recognition and analysis'],
-  ['☀️', 'Analyzing Lighting Conditions', 'Calculating optimal exposure and white balance'],
-  ['📍', 'Location-Based Optimization', 'Adjusting settings for local environmental factors'],
-  ['🌤️', 'Weather Integration', 'Fetching local weather data for optimal shooting'],
-]
-
-function endpoint(path) {
-  return `${API_BASE_URL}${path}`
-}
-
-async function postLocation(path, body) {
-  const controller = new AbortController()
-  const timeout = window.setTimeout(() => controller.abort(), API_TIMEOUT_MS)
-
-  try {
-    const response = await fetch(endpoint(path), {
-      method: 'POST',
-      headers: body ? { 'Content-Type': 'application/json' } : undefined,
-      body: body ? JSON.stringify(body) : undefined,
-      signal: controller.signal,
-    })
-    const text = await response.text()
-    let data = null
-    try { data = text ? JSON.parse(text) : null } catch { data = text }
-    if (!response.ok) {
-      const detail = typeof data === 'object' && data?.error ? data.error : `Server returned ${response.status}`
-      throw new Error(detail)
-    }
-    return data
-  } catch (error) {
-    if (error.name === 'AbortError') throw new Error('Request timed out. Please try again later.')
-    throw error
-  } finally {
-    window.clearTimeout(timeout)
-  }
-}
 
 export default function App() {
   const [activeFeatures, setActiveFeatures] = useState(features.map(([, , active]) => active))
-  const [isModalOpen, setIsModalOpen] = useState(false)
-  const [analysisStep, setAnalysisStep] = useState(0)
-  const [isRequesting, setIsRequesting] = useState(false)
+  const [isSessionOpen, setIsSessionOpen] = useState(false)
   const [status, setStatus] = useState('Ready')
-  const [notice, setNotice] = useState(null)
-
-  const reset = useCallback(() => {
-    setIsModalOpen(false)
-    setIsRequesting(false)
-    setAnalysisStep(0)
-  }, [])
-
-  useEffect(() => {
-    if (!isModalOpen || isRequesting) return undefined
-    const messages = ['Initializing neural network...', 'Analyzing lighting conditions...', 'Location-based optimization ready...', 'Weather integration ready...']
-    setStatus(messages[analysisStep])
-    if (analysisStep === steps.length - 1) return undefined
-    const timer = window.setTimeout(() => setAnalysisStep((current) => current + 1), 900)
-    return () => window.clearTimeout(timer)
-  }, [analysisStep, isModalOpen, isRequesting])
-
-  useEffect(() => {
-    if (!notice) return undefined
-    const timer = window.setTimeout(() => setNotice(null), 5500)
-    return () => window.clearTimeout(timer)
-  }, [notice])
 
   const startAnalysis = () => {
-    setStatus('Starting AI Smart Analysis...')
-    setAnalysisStep(0)
-    setIsModalOpen(true)
+    setStatus('Photo session started')
+    setIsSessionOpen(true)
   }
 
-  const finishWithSuccess = (message, detail) => {
-    reset()
-    setStatus(message)
-    setNotice({ type: 'success', title: 'AI Optimization Complete!', detail })
-  }
-
-  const callFallback = async () => {
-    setStatus('Precise location denied — estimating location from IP...')
-    try {
-      await postLocation('/api/location/fallback')
-      finishWithSuccess('Location estimated from IP', 'Limited location estimate applied. Exact golden-hour timing may be less accurate.')
-    } catch (error) {
-      setStatus(`Fallback location unavailable: ${error.message}`)
-      setNotice({ type: 'warning', title: 'Limited AI Features', detail: 'IP-based location is currently unavailable. You can still use the core AI features.' })
-      reset()
-    }
-  }
-
-  const requestLocation = () => {
-    if (!navigator.geolocation) {
-      setStatus('Geolocation is not supported in this browser')
-      setNotice({ type: 'warning', title: 'Location unavailable', detail: 'Your browser does not support precise location.' })
-      return
-    }
-    setIsRequesting(true)
-    setStatus('Requesting precise location permission...')
-    navigator.geolocation.getCurrentPosition(
-      async ({ coords }) => {
-        setStatus('Sending precise location securely...')
-        try {
-          // Matches the payload sent by the original HTML page, while keeping the
-          // precise latitude and longitude supplied by the browser.
-          await postLocation('/api/location', {
-            latitude: coords.latitude,
-            longitude: coords.longitude,
-            photoStyleId: 1,
-            source: 'PhotoGenius AI',
-            timestamp: new Date().toISOString(),
-            accuracy: coords.accuracy ?? null,
-          })
-          finishWithSuccess('Precise location saved', 'All location-aware AI features are now enabled and ready for perfect photos.')
-        } catch (error) {
-          const locationData = { latitude: coords.latitude, longitude: coords.longitude, savedAt: new Date().toISOString() }
-          const saved = JSON.parse(localStorage.getItem('photogenius_pending_locations') || '[]')
-          localStorage.setItem('photogenius_pending_locations', JSON.stringify([...saved, locationData]))
-          reset()
-          setStatus(`Location not accepted by server: ${error.message}`)
-          setNotice({ type: 'warning', title: 'Saved locally', detail: 'The backend did not accept the location. It has been saved on this device until the API is available.' })
-        }
-      },
-      async (error) => {
-        setIsRequesting(false)
-        // The backend contract explicitly supports IP fallback after a permission denial.
-        if (error.code === error.PERMISSION_DENIED) await callFallback()
-        else {
-          setStatus('Unable to determine precise location')
-          setNotice({ type: 'warning', title: 'Location unavailable', detail: 'Please check your device location settings and try again.' })
-        }
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
-    )
-  }
+  const closeSession = useCallback(() => {
+    setIsSessionOpen(false)
+    setStatus('Ready')
+  }, [])
 
   return (
     <main className="min-h-screen overflow-x-hidden bg-[linear-gradient(135deg,#0f0c29,#302b63,#24243e)] px-3 py-7 font-poppins text-white sm:px-5 sm:py-10">
@@ -170,7 +47,7 @@ export default function App() {
               <div className="mx-auto flex items-center gap-2 rounded-full bg-black/70 px-4 py-2 text-xs animate-pulse sm:text-sm"><span>🧠</span> AI Scene Analysis Active</div>
               <div className="flex justify-center gap-4 sm:gap-5">
                 <button className="control-button" aria-label="Camera settings">⚙️</button>
-                <button className="control-button h-16 w-16 border-4 border-white bg-gradient-to-br from-rose-500 to-pink-400 text-2xl shadow-lg shadow-rose-500/40 sm:h-20 sm:w-20" aria-label="Start AI analysis" onClick={startAnalysis} disabled={isModalOpen}>📷</button>
+                <button className="control-button h-16 w-16 border-4 border-white bg-gradient-to-br from-rose-500 to-pink-400 text-2xl shadow-lg shadow-rose-500/40 sm:h-20 sm:w-20" aria-label="Start photo session" onClick={startAnalysis} disabled={isSessionOpen}>📷</button>
                 <button className="control-button" aria-label="Flash settings">⚡</button>
               </div>
             </div>
@@ -185,15 +62,11 @@ export default function App() {
       </section>
       <footer className="relative z-10 mx-auto mt-8 max-w-6xl border-t border-white/10 pt-6 text-center text-xs text-white/70 sm:text-sm"><p>© 2026 PhotoGenius AI. All rights reserved. | AI Photography Technology v2.4</p><p className="mt-2 text-xs">🛡️ Privacy Protected &nbsp;|&nbsp; ⚡ Real-time Processing &nbsp;|&nbsp; ☁️ Cloud AI</p></footer>
 
-      {isModalOpen && <div className="fixed inset-0 z-50 grid place-items-center overflow-y-auto bg-black/95 p-3 sm:p-5" role="dialog" aria-modal="true" aria-labelledby="analysis-title">
-        <section className="relative my-auto w-full max-w-2xl overflow-hidden rounded-3xl border border-white/10 bg-[linear-gradient(135deg,#1a1a2e,#16213e)] p-5 shadow-2xl sm:p-10">
-          <header className="text-center"><h2 id="analysis-title" className="text-3xl font-bold text-transparent bg-gradient-to-r from-cyan-300 to-sky-400 bg-clip-text sm:text-4xl">AI Smart Analysis</h2><p className="mt-2 text-sm text-white/80 sm:text-base">Optimizing your photography experience with advanced neural networks</p></header>
-          <div className="my-7 space-y-3 sm:my-9">{steps.map(([icon, title, description], index) => <div key={title} className={`flex gap-3 rounded-2xl p-3 transition sm:gap-5 sm:p-5 ${index <= analysisStep ? 'border border-cyan-300/30 bg-cyan-300/10' : 'bg-white/5'}`}><span className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white/10 text-xl sm:h-14 sm:w-14">{icon}</span><div><h3 className="font-semibold text-cyan-300">{title}</h3><p className="mt-1 text-sm text-white/75">{description}</p></div></div>)}</div>
-          <div className="rounded-2xl border-2 border-rose-400/30 bg-rose-500/10 p-5 text-center"><span className="float-right rounded-full bg-rose-500 px-3 py-1 text-[10px] font-bold">REQUIRED</span><h3 className="text-lg font-semibold">⚠️ Location Access Required</h3><p className="mt-3 text-sm leading-relaxed text-white/85">To enable <strong className="text-cyan-300">Smart Lighting Analysis</strong> and <strong className="text-cyan-300">Golden Hour Detection</strong>, PhotoGenius AI needs your precise location.</p><div className="my-4 rounded-xl bg-black/30 p-3 text-left text-sm leading-7 text-white/85"><p>✓ Calculate exact golden hour times</p><p>✓ Analyze local weather conditions</p><p>✓ Adjust for atmospheric conditions</p><p>✓ Recommend nearby photography spots</p></div><p className="text-xs text-white/75">🛡️ Your location data is encrypted and only used for AI optimization.</p><div className="mt-5 flex flex-col justify-center gap-3 sm:flex-row"><button className="rounded-full bg-gradient-to-r from-cyan-300 to-sky-400 px-6 py-3 font-semibold text-slate-950 shadow-lg shadow-cyan-400/20 disabled:cursor-wait disabled:opacity-60" onClick={requestLocation} disabled={isRequesting}>{isRequesting ? 'Enabling...' : '✓ Enable Smart Features'}</button><button className="rounded-full border-2 border-white/20 bg-white/10 px-6 py-3 font-semibold" onClick={() => { reset(); setStatus('Continuing with limited AI features') }}>✕ Continue Without AI</button></div></div>
-          <p className="mt-6 rounded-xl border-l-4 border-cyan-300 bg-white/5 p-4 text-center text-xs text-white/70">🔒 This is a secure, one-time permission request. Location data is processed locally and never stored on our servers.</p>
-        </section>
-      </div>}
-      {notice && <div className={`fixed right-4 top-4 z-[60] max-w-sm rounded-2xl p-5 text-slate-950 shadow-2xl ${notice.type === 'success' ? 'bg-gradient-to-r from-cyan-300 to-sky-400' : 'bg-gradient-to-r from-amber-300 to-orange-300'}`} role="status"><p className="font-bold">{notice.title}</p><p className="mt-1 text-sm">{notice.detail}</p></div>}
+      <PhotoSessionFlow
+        open={isSessionOpen}
+        onClose={closeSession}
+        onStatusChange={setStatus}
+      />
     </main>
   )
 }
