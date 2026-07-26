@@ -1,4 +1,5 @@
-const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim() || ''
+const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL?.trim()
+  || 'https://locationfinder-pdzb.onrender.com'
 
 export const apiConfig = {
   baseUrl: configuredBaseUrl.replace(/\/$/, ''),
@@ -10,4 +11,3 @@ export function apiUrl(path) {
   const normalizedPath = path.startsWith('/') ? path : `/${path}`
   return `${apiConfig.baseUrl}${normalizedPath}`
 }
-

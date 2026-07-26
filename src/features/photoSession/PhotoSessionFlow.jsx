@@ -13,6 +13,7 @@ import {
   normalizeSessionStatus,
   requestEnhancement,
   uploadOriginalPhoto,
+  validateOriginalPhoto,
   waitForEnhancedPhoto,
 } from './photoSessionApi'
 
@@ -45,6 +46,7 @@ export default function PhotoSessionFlow({ open, onClose, onStatusChange }) {
   const busyRef = useRef(false)
   const activeRef = useRef(open)
   const modalRef = useRef(null)
+  const pollingControllerRef = useRef(null)
   const [phase, setPhase] = useState('intro')
   const [capturedFile, setCapturedFile] = useState(null)
   const [capturedUrl, setCapturedUrl] = useState('')
@@ -62,6 +64,8 @@ export default function PhotoSessionFlow({ open, onClose, onStatusChange }) {
   }, [])
 
   const resetFlow = useCallback(() => {
+    pollingControllerRef.current?.abort()
+    pollingControllerRef.current = null
     stopCamera()
     revokePhotoUrl()
     clearLocation()
@@ -83,6 +87,7 @@ export default function PhotoSessionFlow({ open, onClose, onStatusChange }) {
 
   useEffect(() => () => {
     activeRef.current = false
+    pollingControllerRef.current?.abort()
     stopCamera()
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current)
   }, [stopCamera])
@@ -169,6 +174,14 @@ export default function PhotoSessionFlow({ open, onClose, onStatusChange }) {
 
   const uploadPhoto = async (selectedLocation) => {
     if (!capturedFile || busyRef.current) return
+    try {
+      validateOriginalPhoto(capturedFile)
+    } catch (error) {
+      setMessage(userMessageFor(error, error.message))
+      setPhase('upload-error')
+      onStatusChange?.('Photo validation failed')
+      return
+    }
     busyRef.current = true
     setIsApproximating(true)
     setMessage('')
@@ -247,6 +260,9 @@ export default function PhotoSessionFlow({ open, onClose, onStatusChange }) {
 
   const enhancePhoto = async () => {
     if (!session.sessionId || busyRef.current) return
+    pollingControllerRef.current?.abort()
+    const pollingController = new AbortController()
+    pollingControllerRef.current = pollingController
     busyRef.current = true
     setMessage('')
     setPhase('processing')
@@ -254,9 +270,12 @@ export default function PhotoSessionFlow({ open, onClose, onStatusChange }) {
     onStatusChange?.('AI enhancement in progress')
 
     try {
-      const enhancementResponse = await requestEnhancement(session.sessionId)
+      const enhancementResponse = await requestEnhancement(session.sessionId, {
+        signal: pollingController.signal,
+      })
       const completedSession = await waitForEnhancedPhoto(session.sessionId, {
         initialResponse: enhancementResponse,
+        signal: pollingController.signal,
         onStatus: (status) => {
           if (activeRef.current) setProcessingStatus(status || 'PROCESSING')
         },
@@ -273,6 +292,7 @@ export default function PhotoSessionFlow({ open, onClose, onStatusChange }) {
       setPhase('result')
       onStatusChange?.('AI enhancement complete')
     } catch (error) {
+      if (error.code === 'REQUEST_CANCELLED') return
       if (import.meta.env.DEV) console.error('Enhancement failed', error)
       setMessage(
         error.code === 'SESSION_EXPIRED' || error.status === 404 || error.status === 410
@@ -282,6 +302,9 @@ export default function PhotoSessionFlow({ open, onClose, onStatusChange }) {
       setPhase('enhance-error')
       onStatusChange?.('AI enhancement failed')
     } finally {
+      if (pollingControllerRef.current === pollingController) {
+        pollingControllerRef.current = null
+      }
       busyRef.current = false
     }
   }

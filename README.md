@@ -53,9 +53,13 @@ The upload request is `multipart/form-data` with:
 - `longitude` when available
 - `accuracy` when available
 
+The frontend accepts JPEG, PNG, and WebP files up to 10 MB. It does not set the multipart `Content-Type` header manually, so the browser supplies the required boundary.
+
 The create response must contain `sessionId` or `id`. A completed session must contain `enhancedImageUrl`; `originalImageUrl`, `status`, and `canEnhanceAgain` are also supported.
 
 Supported processing statuses include `CREATED`, `PHOTO_UPLOADED`, `PROCESSING`, `COMPLETED`, `FAILED`, `ERROR`, `CANCELLED`, and `EXPIRED`.
+
+After `/enhance` returns `PROCESSING`, the frontend polls every two seconds for up to 90 attempts. Polling is cancelled when the flow closes, resets, or unmounts.
 
 No Gemini key or direct Gemini request exists in the frontend.
 
@@ -63,7 +67,7 @@ No Gemini key or direct Gemini request exists in the frontend.
 
 | Variable | Required | Purpose |
 |---|---:|---|
-| `VITE_API_BASE_URL` | Production | Backend origin, without a trailing slash |
+| `VITE_API_BASE_URL` | Recommended | Backend origin; defaults to `https://locationfinder-pdzb.onrender.com` |
 | `VITE_PHOTO_SESSIONS_PATH` | No | Overrides `/api/v1/photo-sessions` |
 | `VITE_API_TIMEOUT_MS` | No | Standard API timeout; defaults to 20000 ms |
 | `VITE_DEV_API_PROXY` | Local only | Optional Vite `/api` proxy target |
