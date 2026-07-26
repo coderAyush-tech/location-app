@@ -46,19 +46,35 @@ export async function createPhotoSession({ signal } = {}) {
   return requireSessionId(response)
 }
 
-export function uploadOriginalPhoto(sessionId, photo, location, { signal } = {}) {
+function buildPhotoFormData(photo, location, includeAccuracy) {
   const formData = new FormData()
   formData.append('photo', photo, photo.name)
   if (Number.isFinite(location?.latitude)) formData.append('latitude', String(location.latitude))
   if (Number.isFinite(location?.longitude)) formData.append('longitude', String(location.longitude))
-  if (Number.isFinite(location?.accuracy)) formData.append('accuracy', String(location.accuracy))
+  if (includeAccuracy && Number.isFinite(location?.accuracy) && location.accuracy >= 0) {
+    formData.append('accuracy', String(location.accuracy))
+  }
+  return formData
+}
 
-  return apiRequest(sessionPath(sessionId, '/photo'), {
+export async function uploadOriginalPhoto(sessionId, photo, location, { signal } = {}) {
+  const upload = (includeAccuracy) => apiRequest(sessionPath(sessionId, '/photo'), {
     method: 'POST',
-    body: formData,
+    body: buildPhotoFormData(photo, location, includeAccuracy),
     timeoutMs: 45_000,
     signal,
   })
+
+  try {
+    return await upload(true)
+  } catch (error) {
+    // Accuracy is optional. If it exceeds the backend's configured limit,
+    // retry the rejected upload without inventing or clamping a measurement.
+    if (error.status === 400 && /accuracy/i.test(error.message)) {
+      return upload(false)
+    }
+    throw error
+  }
 }
 
 export function requestEnhancement(sessionId, { signal } = {}) {
