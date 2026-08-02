@@ -18,8 +18,8 @@ Camera and precise-location permissions require HTTPS or localhost.
 
 1. The user opens the capture dialog from the red camera button.
 2. The app clearly explains that the photo and allowed location will be saved in the database.
-3. The visible `Open Camera` click starts both camera and optional GPS permission requests.
-4. The live front-camera stream appears in the video preview.
+3. The visible `Open Camera` click requests camera permission first.
+4. After the camera succeeds, the live preview appears immediately and optional GPS is requested separately.
 5. `Capture & Upload` converts the current frame to a JPEG `File`.
 6. The frontend sends one multipart request to `POST /api/v1/captures`.
 7. A successful request must return HTTP `201` with `{ "saved": true }`.
@@ -74,8 +74,10 @@ The required Spring Boot implementation contract is in `BACKEND_ADMIN_PROMPT.md`
 1. Open the deployed site over HTTPS.
 2. Click the red camera button and confirm no browser permission has appeared yet.
 3. Read the database-storage notice and click `Open Camera`.
-4. Confirm camera and location prompts start from that click.
+4. Confirm the camera prompt appears first and optional location starts only after camera permission succeeds.
 5. Allow both permissions, capture, and verify one `/api/v1/captures` request contains the photo and GPS fields.
 6. Repeat while denying location and verify the upload still works without latitude, longitude, or accuracy.
 7. Cancel before capture and confirm the browser camera indicator switches off.
 8. Confirm success is shown only for status `201` and `saved: true`.
+
+Run `npm test` for the automated camera/location permission and upload-contract checks.

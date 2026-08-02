@@ -1,19 +1,41 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { uploadCapture } from './captureApi'
 
+const initialCameraState = {
+  status: 'idle',
+  message: 'Camera permission has not been requested yet.',
+}
+
 const initialLocationState = {
   status: 'idle',
-  message: 'Location permission has not been requested yet.',
+  message: 'Optional location starts after the camera is ready.',
 }
+
+const cameraPermissionTimeoutMs = 15_000
 
 function stopTracks(stream) {
   stream?.getTracks().forEach((track) => track.stop())
 }
 
-function locationFailureMessage(error) {
-  if (error?.code === 1) return 'Location permission denied. The backend will use its IP fallback.'
-  if (error?.code === 3) return 'Location request timed out. The backend will use its IP fallback.'
-  return 'Location is unavailable. The backend will use its IP fallback.'
+function locationFailureState(error) {
+  if (error?.code === 1) {
+    return {
+      status: 'denied',
+      message: 'Location denied — IP fallback will be used.',
+    }
+  }
+
+  if (error?.code === 3) {
+    return {
+      status: 'timedout',
+      message: 'Location timed out — IP fallback will be used.',
+    }
+  }
+
+  return {
+    status: 'unavailable',
+    message: 'Location unavailable — IP fallback will be used.',
+  }
 }
 
 export default function CaptureFlow({ open, onClose, onStatusChange }) {
@@ -22,10 +44,13 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
   const locationRef = useRef(null)
   const uploadControllerRef = useRef(null)
   const permissionRequestRef = useRef(0)
+  const cameraTimeoutRef = useRef(null)
+  const cameraWaitCancelRef = useRef(null)
   const openRef = useRef(open)
 
   const [phase, setPhase] = useState('consent')
   const [stream, setStream] = useState(null)
+  const [cameraState, setCameraState] = useState(initialCameraState)
   const [locationState, setLocationState] = useState(initialLocationState)
   const [capturedFile, setCapturedFile] = useState(null)
   const [errorMessage, setErrorMessage] = useState('')
@@ -47,6 +72,7 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
 
   const resetFlow = useCallback(() => {
     locationRef.current = null
+    setCameraState(initialCameraState)
     setLocationState(initialLocationState)
     setCapturedFile(null)
     setErrorMessage('')
@@ -54,37 +80,55 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
     setPhase('consent')
   }, [])
 
-  const closeFlow = useCallback(() => {
+  const cancelPendingCameraWait = useCallback(() => {
+    window.clearTimeout(cameraTimeoutRef.current)
+    cameraTimeoutRef.current = null
+
+    const cancelWait = cameraWaitCancelRef.current
+    cameraWaitCancelRef.current = null
+    cancelWait?.()
+  }, [])
+
+  const invalidateActiveRun = useCallback(() => {
     permissionRequestRef.current += 1
+    cancelPendingCameraWait()
     uploadControllerRef.current?.abort()
     uploadControllerRef.current = null
+  }, [cancelPendingCameraWait])
+
+  const closeFlow = useCallback(() => {
+    invalidateActiveRun()
     stopCamera()
     resetFlow()
     onClose()
-  }, [onClose, resetFlow, stopCamera])
+  }, [invalidateActiveRun, onClose, resetFlow, stopCamera])
 
   useEffect(() => {
     if (!open) {
-      permissionRequestRef.current += 1
-      uploadControllerRef.current?.abort()
-      uploadControllerRef.current = null
+      invalidateActiveRun()
       stopCamera()
       resetFlow()
     }
-  }, [open, resetFlow, stopCamera])
+  }, [invalidateActiveRun, open, resetFlow, stopCamera])
 
   useEffect(() => () => {
     permissionRequestRef.current += 1
+    cancelPendingCameraWait()
     uploadControllerRef.current?.abort()
     stopTracks(streamRef.current)
-  }, [])
+  }, [cancelPendingCameraWait])
 
   useEffect(() => {
     if (!stream || !videoRef.current) return
 
     videoRef.current.srcObject = stream
     videoRef.current.play().catch(() => {
+      permissionRequestRef.current += 1
       setErrorMessage('Camera preview could not start. Please try again.')
+      setCameraState({
+        status: 'unavailable',
+        message: 'Camera preview unavailable.',
+      })
       setPhase('error')
       stopCamera()
     })
@@ -101,18 +145,122 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
     return () => window.removeEventListener('keydown', handleEscape)
   }, [closeFlow, open])
 
+  const requestOptionalLocation = useCallback(async (requestId) => {
+    const isCurrentRun = () => (
+      permissionRequestRef.current === requestId && openRef.current
+    )
+
+    if (!navigator.geolocation) {
+      if (!isCurrentRun()) return
+
+      locationRef.current = null
+      setLocationState({
+        status: 'unavailable',
+        message: 'Location unavailable — IP fallback will be used.',
+      })
+      return
+    }
+
+    setLocationState({
+      status: 'requesting',
+      message: 'Requesting optional location…',
+    })
+
+    if (navigator.permissions?.query) {
+      try {
+        const permission = await navigator.permissions.query({ name: 'geolocation' })
+
+        if (!isCurrentRun()) return
+
+        if (permission.state === 'denied') {
+          locationRef.current = null
+          setLocationState({
+            status: 'blocked',
+            message: 'Location is blocked for this website. Open browser Site settings → Location and select Allow/Ask. The backend will use IP fallback.',
+          })
+          return
+        }
+      } catch {
+        // Some browsers expose Permissions API without geolocation query support.
+      }
+    }
+
+    if (!isCurrentRun()) return
+
+    try {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          if (!isCurrentRun()) return
+
+          const latitude = position.coords.latitude
+          const longitude = position.coords.longitude
+          const accuracy = position.coords.accuracy
+
+          if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            locationRef.current = null
+            setLocationState({
+              status: 'unavailable',
+              message: 'Location unavailable — IP fallback will be used.',
+            })
+            return
+          }
+
+          locationRef.current = { latitude, longitude, accuracy }
+          setLocationState({
+            status: 'ready',
+            message: Number.isFinite(accuracy)
+              ? `GPS ready (approximately ${Math.round(accuracy)} metres).`
+              : 'GPS ready.',
+          })
+        },
+        (error) => {
+          if (!isCurrentRun()) return
+
+          locationRef.current = null
+          setLocationState(locationFailureState(error))
+        },
+        {
+          enableHighAccuracy: true,
+          timeout: 15_000,
+          maximumAge: 0,
+        },
+      )
+    } catch {
+      if (!isCurrentRun()) return
+
+      locationRef.current = null
+      setLocationState({
+        status: 'unavailable',
+        message: 'Location unavailable — IP fallback will be used.',
+      })
+    }
+  }, [])
+
   const openCamera = async () => {
     const requestId = permissionRequestRef.current + 1
     permissionRequestRef.current = requestId
+    cancelPendingCameraWait()
+    uploadControllerRef.current?.abort()
+    uploadControllerRef.current = null
+    stopCamera()
     locationRef.current = null
+    setCameraState({
+      status: 'requesting',
+      message: 'Requesting camera permission…',
+    })
+    setLocationState(initialLocationState)
     setCapturedFile(null)
     setSavedResult(null)
     setErrorMessage('')
     setPhase('opening')
-    onStatusChange('Requesting camera and location permissions')
+    onStatusChange('Requesting camera permission')
 
     if (!window.isSecureContext) {
       setErrorMessage('Camera and location require HTTPS or localhost.')
+      setCameraState({
+        status: 'unavailable',
+        message: 'Camera requires a secure connection.',
+      })
       setPhase('error')
       onStatusChange('Secure connection required')
       return
@@ -120,61 +268,49 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
 
     if (!navigator.mediaDevices?.getUserMedia) {
       setErrorMessage('This browser does not support camera access.')
+      setCameraState({
+        status: 'unavailable',
+        message: 'Camera unavailable in this browser.',
+      })
       setPhase('error')
       onStatusChange('Camera unavailable')
       return
     }
 
-    // Both permission requests deliberately start in this same visible button click.
     const cameraPromise = navigator.mediaDevices.getUserMedia({
       video: { facingMode: 'user' },
       audio: false,
     })
 
-    if (navigator.geolocation) {
-      setLocationState({
-        status: 'requesting',
-        message: 'Waiting for optional GPS location…',
-      })
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          if (permissionRequestRef.current !== requestId || !openRef.current) return
-
-          const nextLocation = {
-            latitude: position.coords.latitude,
-            longitude: position.coords.longitude,
-            accuracy: position.coords.accuracy,
-          }
-          locationRef.current = nextLocation
-          setLocationState({
-            status: 'ready',
-            message: `GPS ready (about ${Math.round(position.coords.accuracy)} m accuracy).`,
-          })
-        },
-        (error) => {
-          if (permissionRequestRef.current !== requestId || !openRef.current) return
-
-          locationRef.current = null
-          setLocationState({
-            status: 'unavailable',
-            message: locationFailureMessage(error),
-          })
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 10_000,
-          maximumAge: 0,
-        },
-      )
-    } else {
-      setLocationState({
-        status: 'unavailable',
-        message: 'This browser has no GPS support. The backend will use its IP fallback.',
-      })
-    }
+    let cameraTimedOut = false
+    cameraPromise.then((lateStream) => {
+      if (cameraTimedOut || permissionRequestRef.current !== requestId || !openRef.current) {
+        stopTracks(lateStream)
+      }
+    }).catch(() => {})
 
     try {
-      const nextStream = await cameraPromise
+      const timeoutPromise = new Promise((_, reject) => {
+        cameraWaitCancelRef.current = () => {
+          const cancelledError = new Error('Camera request cancelled')
+          cancelledError.name = 'CameraRequestCancelled'
+          reject(cancelledError)
+        }
+
+        cameraTimeoutRef.current = window.setTimeout(() => {
+          cameraTimedOut = true
+          cameraTimeoutRef.current = null
+          cameraWaitCancelRef.current = null
+          const timeoutError = new Error('Camera permission timed out')
+          timeoutError.name = 'CameraTimeoutError'
+          reject(timeoutError)
+        }, cameraPermissionTimeoutMs)
+      })
+
+      const nextStream = await Promise.race([cameraPromise, timeoutPromise])
+      window.clearTimeout(cameraTimeoutRef.current)
+      cameraTimeoutRef.current = null
+      cameraWaitCancelRef.current = null
 
       if (permissionRequestRef.current !== requestId || !openRef.current) {
         stopTracks(nextStream)
@@ -183,21 +319,47 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
 
       streamRef.current = nextStream
       setStream(nextStream)
+      setCameraState({
+        status: 'ready',
+        message: 'Camera ready',
+      })
       setPhase('camera')
       onStatusChange('Camera ready — capture when you are ready')
+      void requestOptionalLocation(requestId)
     } catch (error) {
       if (permissionRequestRef.current !== requestId || !openRef.current) return
 
-      const message = error?.name === 'NotAllowedError'
-        ? 'Camera permission was denied. Allow camera access and try again.'
-        : 'Camera could not be opened. Check that it is not being used by another app.'
-      setErrorMessage(message)
+      window.clearTimeout(cameraTimeoutRef.current)
+      cameraTimeoutRef.current = null
+      cameraWaitCancelRef.current = null
+
+      if (error?.name === 'CameraTimeoutError') {
+        permissionRequestRef.current += 1
+        setErrorMessage('Camera permission did not respond within 15 seconds. Open browser Site settings → Camera and select Allow/Ask, then try again.')
+        setCameraState({
+          status: 'timedout',
+          message: 'Camera permission timed out.',
+        })
+        setPhase('error')
+        onStatusChange('Camera permission timed out')
+        return
+      }
+
+      const cameraDenied = error?.name === 'NotAllowedError' || error?.name === 'SecurityError'
+      setErrorMessage(cameraDenied
+        ? 'Camera permission was denied or blocked. Open browser Site settings → Camera and select Allow/Ask, then try again.'
+        : 'Camera could not be opened. Check that it is not being used by another app.')
+      setCameraState({
+        status: cameraDenied ? 'denied' : 'unavailable',
+        message: cameraDenied ? 'Camera permission denied.' : 'Camera unavailable.',
+      })
       setPhase('error')
       onStatusChange('Camera permission failed')
     }
   }
 
   const performUpload = async (photoFile) => {
+    const requestId = permissionRequestRef.current
     const controller = new AbortController()
     uploadControllerRef.current = controller
     setErrorMessage('')
@@ -211,13 +373,21 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
         signal: controller.signal,
       })
 
-      if (!openRef.current || controller.signal.aborted) return
+      if (
+        permissionRequestRef.current !== requestId
+        || !openRef.current
+        || controller.signal.aborted
+      ) return
 
       setSavedResult(result)
       setPhase('success')
       onStatusChange('Photo saved successfully')
     } catch (error) {
-      if (!openRef.current || controller.signal.aborted) return
+      if (
+        permissionRequestRef.current !== requestId
+        || !openRef.current
+        || controller.signal.aborted
+      ) return
 
       setErrorMessage(error.message || 'Upload failed. Please try again.')
       setPhase('error')
@@ -230,6 +400,7 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
   }
 
   const captureAndUpload = async () => {
+    const requestId = permissionRequestRef.current
     const video = videoRef.current
 
     if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
@@ -255,6 +426,8 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
       canvas.toBlob(resolve, 'image/jpeg', 0.92)
     })
 
+    if (permissionRequestRef.current !== requestId || !openRef.current) return
+
     if (!photoBlob) {
       setErrorMessage('Photo capture failed. Please try again.')
       return
@@ -272,12 +445,9 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
   }
 
   const startAgain = () => {
-    locationRef.current = null
-    setLocationState(initialLocationState)
-    setCapturedFile(null)
-    setErrorMessage('')
-    setSavedResult(null)
-    setPhase('consent')
+    invalidateActiveRun()
+    stopCamera()
+    resetFlow()
     onStatusChange('Ready to open camera')
   }
 
@@ -285,7 +455,7 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
 
   const locationTone = locationState.status === 'ready'
     ? 'border-emerald-400/30 bg-emerald-400/10 text-emerald-100'
-    : locationState.status === 'unavailable'
+    : ['blocked', 'denied', 'timedout', 'unavailable'].includes(locationState.status)
       ? 'border-amber-400/30 bg-amber-400/10 text-amber-100'
       : 'border-cyan-400/30 bg-cyan-400/10 text-cyan-100'
 
@@ -341,8 +511,12 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
           {phase === 'opening' && (
             <div className="py-10 text-center">
               <div className="mx-auto h-12 w-12 animate-spin rounded-full border-4 border-white/10 border-t-rose-400" />
-              <h3 className="mt-5 text-xl font-semibold">Waiting for your permissions</h3>
-              <p className="mt-2 text-sm text-slate-300">Approve the camera and optional location prompts in your browser.</p>
+              <h3 className="mt-5 text-xl font-semibold">Requesting camera permission…</h3>
+              <p className="mt-2 text-sm text-slate-300">Allow camera access in your browser to start the preview.</p>
+              <div className="mx-auto mt-5 max-w-md rounded-xl border border-cyan-400/30 bg-cyan-400/10 px-4 py-3 text-left text-sm text-cyan-100">
+                <span className="block text-[10px] font-semibold uppercase tracking-[0.18em] text-cyan-200/70">Camera</span>
+                <span className="mt-1 block">{cameraState.message}</span>
+              </div>
               <button className="capture-button-secondary mt-6" onClick={closeFlow} type="button">Cancel</button>
             </div>
           )}
@@ -359,8 +533,15 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
                   ref={videoRef}
                 />
               </div>
-              <div className={`rounded-xl border px-4 py-3 text-sm ${locationTone}`}>
-                {locationState.message}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
+                  <span className="block text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-200/70">Camera</span>
+                  <span className="mt-1 block">{cameraState.message}</span>
+                </div>
+                <div className={`rounded-xl border px-4 py-3 text-sm ${locationTone}`}>
+                  <span className="block text-[10px] font-semibold uppercase tracking-[0.18em] opacity-70">Optional GPS</span>
+                  <span className="mt-1 block">{locationState.message}</span>
+                </div>
               </div>
               {errorMessage && (
                 <p className="rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">
