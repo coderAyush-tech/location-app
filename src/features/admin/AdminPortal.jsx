@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AdminApiError,
+  deleteAdminCapture,
   fetchAdminCapturePhoto,
   fetchAdminCaptures,
   loginAdmin,
@@ -68,7 +69,17 @@ function DetailItem({ label, value }) {
   )
 }
 
-function CaptureDetail({ capture, photoUrl, photoLoading, photoError, onClose }) {
+function CaptureDetail({
+  capture,
+  photoUrl,
+  photoLoading,
+  photoError,
+  deleteLoading,
+  deleteError,
+  onClose,
+  onDelete,
+}) {
+  const [confirmDelete, setConfirmDelete] = useState(false)
   const extraDetails = Object.entries(capture).filter(([key]) => !knownDetailKeys.has(key))
 
   return (
@@ -79,8 +90,29 @@ function CaptureDetail({ capture, photoUrl, photoLoading, photoError, onClose })
             <p className="text-[10px] uppercase tracking-[0.3em] text-emerald-400/60">Capture intelligence record</p>
             <h2 className="mt-1 break-all text-lg font-semibold text-emerald-200">{getCaptureId(capture)}</h2>
           </div>
-          <button className="admin-button-secondary" onClick={onClose} type="button">Close</button>
+          <div className="flex items-center gap-2">
+            <button className="admin-button-danger" onClick={() => setConfirmDelete(true)} type="button">Delete record</button>
+            <button className="admin-button-secondary" onClick={onClose} type="button">Close</button>
+          </div>
         </header>
+
+        {confirmDelete && (
+          <div className="border-b border-red-400/20 bg-red-950/35 p-4 sm:p-5">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <p className="text-sm font-semibold text-red-200">Permanently delete this database record and its saved photo?</p>
+                <p className="mt-1 text-xs leading-5 text-red-200/60">This action cannot be undone. No other capture record will be changed.</p>
+                {deleteError && <p className="mt-2 text-sm text-red-300">{deleteError}</p>}
+              </div>
+              <div className="flex shrink-0 flex-col-reverse gap-2 sm:flex-row">
+                <button className="admin-button-secondary" disabled={deleteLoading} onClick={() => setConfirmDelete(false)} type="button">Cancel</button>
+                <button className="admin-button-danger-solid" disabled={deleteLoading} onClick={onDelete} type="button">
+                  {deleteLoading ? 'Deleting...' : 'Permanently delete'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="grid gap-5 p-4 sm:p-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,.9fr)]">
           <div className="flex min-h-72 items-center justify-center overflow-hidden rounded-xl border border-emerald-400/15 bg-black/60">
@@ -137,6 +169,8 @@ export default function AdminPortal({ onClose }) {
   const [photoUrl, setPhotoUrl] = useState('')
   const [photoLoading, setPhotoLoading] = useState(false)
   const [photoError, setPhotoError] = useState('')
+  const [deleteLoading, setDeleteLoading] = useState(false)
+  const [deleteError, setDeleteError] = useState('')
 
   const logout = useCallback(() => {
     setToken('')
@@ -209,6 +243,11 @@ export default function AdminPortal({ onClose }) {
   }, [selectedCapture, token])
 
   useEffect(() => {
+    setDeleteLoading(false)
+    setDeleteError('')
+  }, [selectedCapture])
+
+  useEffect(() => {
     const handleEscape = (event) => {
       if (event.key !== 'Escape') return
       if (selectedCapture) setSelectedCapture(null)
@@ -234,6 +273,40 @@ export default function AdminPortal({ onClose }) {
       setLoginError(error.message || 'Authentication failed.')
     } finally {
       setLoginLoading(false)
+    }
+  }
+
+  const handleDeleteCapture = async () => {
+    if (!selectedCapture || !token || deleteLoading) return
+
+    const controller = new AbortController()
+    const shouldReturnToPreviousPage = page > 0 && captures.length === 1
+    setDeleteLoading(true)
+    setDeleteError('')
+
+    try {
+      await deleteAdminCapture({
+        token,
+        captureId: getCaptureId(selectedCapture),
+        signal: controller.signal,
+      })
+      setSelectedCapture(null)
+
+      if (shouldReturnToPreviousPage) {
+        setPage((current) => current - 1)
+      } else {
+        await loadCaptures(controller.signal)
+      }
+    } catch (error) {
+      if (error.name === 'AbortError') return
+      if (error instanceof AdminApiError && (error.status === 401 || error.status === 403)) {
+        logout()
+        setLoginError('Admin session expired or access was denied. Sign in again.')
+        return
+      }
+      setDeleteError(error.message || 'The record could not be deleted.')
+    } finally {
+      if (!controller.signal.aborted) setDeleteLoading(false)
     }
   }
 
@@ -438,7 +511,10 @@ export default function AdminPortal({ onClose }) {
       {selectedCapture && (
         <CaptureDetail
           capture={selectedCapture}
+          deleteError={deleteError}
+          deleteLoading={deleteLoading}
           onClose={() => setSelectedCapture(null)}
+          onDelete={handleDeleteCapture}
           photoError={photoError}
           photoLoading={photoLoading}
           photoUrl={photoUrl}

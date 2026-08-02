@@ -10,10 +10,83 @@ html { background: #0f0c29; }
 body { margin: 0; min-width: 320px; }
 button { font: inherit; }
 button:focus-visible,
-input:focus-visible {
+input:focus-visible,
+select:focus-visible {
   outline: 2px solid #fb7185;
   outline-offset: 3px;
 }
+
+.studio-page {
+  position: relative;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 8% 4%, rgb(255 255 255 / .95), transparent 30%),
+    radial-gradient(circle at 92% 10%, rgb(188 164 141 / .22), transparent 28%),
+    linear-gradient(145deg, #f3f0e9 0%, #e9e4db 52%, #eeeae3 100%);
+}
+
+.studio-page::before {
+  position: fixed;
+  z-index: -1;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  opacity: .16;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.18'/%3E%3C/svg%3E");
+}
+
+.camera-grid {
+  background-image:
+    linear-gradient(to right, transparent 33.15%, rgb(255 255 255 / .42) 33.3%, transparent 33.45%, transparent 66.48%, rgb(255 255 255 / .42) 66.63%, transparent 66.78%),
+    linear-gradient(to bottom, transparent 33.15%, rgb(255 255 255 / .42) 33.3%, transparent 33.45%, transparent 66.48%, rgb(255 255 255 / .42) 66.63%, transparent 66.78%);
+}
+
+.focus-frame {
+  border: 1px solid rgb(255 255 255 / .75);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / .08), inset 0 0 30px rgb(255 255 255 / .04);
+}
+
+.focus-frame::after {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: .35rem;
+  height: .35rem;
+  border: 1px solid rgb(255 255 255 / .85);
+  border-radius: 999px;
+  content: "";
+  transform: translate(-50%, -50%);
+}
+
+.studio-control-button {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  place-items: center;
+  border: 1px solid rgb(255 255 255 / .18);
+  border-radius: 999px;
+  background: rgb(255 255 255 / .08);
+  color: rgb(255 255 255 / .82);
+  transition: transform 150ms ease, background-color 150ms ease;
+}
+
+.studio-control-button:hover { transform: translateY(-1px); background: rgb(255 255 255 / .15); }
+
+.studio-shutter-button {
+  display: grid;
+  width: 4.65rem;
+  height: 4.65rem;
+  place-items: center;
+  border: .35rem solid rgb(255 255 255 / .9);
+  border-radius: 999px;
+  background: #a34835;
+  color: white;
+  box-shadow: 0 10px 28px rgb(63 15 8 / .35), inset 0 0 0 1px rgb(0 0 0 / .12);
+  transition: transform 150ms ease, background-color 150ms ease;
+}
+
+.studio-shutter-button:hover:not(:disabled) { transform: scale(1.04); background: #923d2d; }
+.studio-shutter-button:disabled { cursor: not-allowed; opacity: .55; }
 
 .float-shape {
   position: absolute;
@@ -123,7 +196,9 @@ input:focus-visible {
 .admin-input:focus-visible { outline-color: #34d399; }
 
 .admin-button-primary,
-.admin-button-secondary {
+.admin-button-secondary,
+.admin-button-danger,
+.admin-button-danger-solid {
   min-height: 2.5rem;
   border-radius: .5rem;
   padding: .58rem .9rem;
@@ -146,10 +221,26 @@ input:focus-visible {
   color: rgb(209 250 229 / .72);
 }
 
+.admin-button-danger {
+  border: 1px solid rgb(248 113 113 / .35);
+  background: rgb(127 29 29 / .16);
+  color: #fca5a5;
+}
+
+.admin-button-danger-solid {
+  border: 1px solid rgb(248 113 113 / .7);
+  background: #b91c1c;
+  color: white;
+}
+
 .admin-button-primary:hover:not(:disabled) { background: rgb(16 185 129 / .28); }
 .admin-button-secondary:hover:not(:disabled) { border-color: rgb(52 211 153 / .4); color: #d1fae5; }
+.admin-button-danger:hover:not(:disabled) { border-color: rgb(248 113 113 / .65); background: rgb(127 29 29 / .3); }
+.admin-button-danger-solid:hover:not(:disabled) { background: #991b1b; }
 .admin-button-primary:disabled,
-.admin-button-secondary:disabled { cursor: not-allowed; opacity: .4; }
+.admin-button-secondary:disabled,
+.admin-button-danger:disabled,
+.admin-button-danger-solid:disabled { cursor: not-allowed; opacity: .4; }
 
 .admin-chip {
   display: inline-flex;

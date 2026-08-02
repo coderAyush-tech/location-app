@@ -20,7 +20,7 @@ POST /api/v1/captures
 
 It currently stores the photo plus GPS fields when provided, or Geo-IP/raw-IP information when GPS is unavailable. Do not rename, remove, or change this endpoint, its validation, storage behavior, or its `201` response containing `saved: true`.
 
-Implement a secure, read-only admin API for the new frontend admin terminal.
+Implement secure admin authentication, read-only capture inspection, and one narrowly scoped permanent-delete endpoint for the new frontend admin terminal.
 
 ## 1. Authentication
 
@@ -148,11 +148,40 @@ Requirements:
 - Do not expose a public unauthenticated storage URL.
 - Stream the resource; do not unnecessarily copy a large photo several times in memory.
 
-## 4. Client IP correctness
+## 4. Permanently delete one capture
+
+Create:
+
+```http
+DELETE /api/v1/admin/captures/{captureId}
+Authorization: Bearer <token>
+```
+
+Successful response:
+
+```text
+204 No Content
+```
+
+Requirements:
+
+- Require the same valid admin role/token as every other protected admin endpoint.
+- Delete only the capture identified by the exact path ID.
+- Permanently remove both its database record and its saved photo/blob/object.
+- Do not delete or update any other capture, user data, or unrelated storage object.
+- Use a transaction when the photo is stored in the database.
+- If external/object storage is used, handle partial failures safely so the API never reports success while leaving an unintended inconsistent record.
+- Return `404 application/problem+json` when the capture does not exist.
+- Return `409 application/problem+json` if a safe deletion cannot be completed because of a storage/database conflict.
+- Return no photo bytes, token data, or deleted entity body.
+- Write a security audit event containing the admin identity, capture ID, timestamp, trusted client IP, and success/failure result. Never log the token or photo bytes.
+- The operation is irreversible. Do not implement bulk delete.
+
+## 5. Client IP correctness
 
 The backend is deployed behind Render/proxies. Resolve the client IP only from trusted proxy headers configured for the deployment. Do not blindly trust arbitrary forwarded headers. Preserve the current raw IP/Geo-IP capture behavior while making it proxy-aware if it is not already.
 
-## 5. CORS and security headers
+## 6. CORS and security headers
 
 Allow the exact origins:
 
@@ -164,13 +193,13 @@ http://localhost:5173
 For admin APIs allow:
 
 ```text
-Methods: GET, POST, OPTIONS
+Methods: GET, POST, DELETE, OPTIONS
 Headers: Authorization, Content-Type, Accept
 ```
 
 Do not use wildcard origins together with credentials. Add appropriate security headers and `Cache-Control: no-store` to login and admin JSON responses.
 
-## 6. Required verification
+## 7. Required verification
 
 Add automated tests covering:
 
@@ -183,19 +212,25 @@ Add automated tests covering:
 - authorized pagination, search, filter, and newest-first sorting;
 - authorized photo response returns the correct bytes and MIME type;
 - missing photo returns `404`;
+- delete returns `401` without a token and `403` for a non-admin token;
+- authorized delete removes exactly one requested record and its corresponding photo;
+- deleting an unknown capture returns `404` without changing other records;
+- storage/database deletion failure does not return a false success;
+- delete creates a safe audit event without secrets or photo bytes;
 - public `POST /api/v1/captures` still behaves exactly as before;
-- CORS preflight succeeds from `https://bestue.netlify.app` with the `Authorization` header.
+- CORS preflight succeeds from `https://bestue.netlify.app` for `DELETE` with the `Authorization` header.
 
 Run the complete existing backend test suite. Provide the environment variable names required for Render, but never commit their values.
 
-Do not add delete/edit/export actions. This admin release is intentionally read-only.
+Do not add edit, bulk-delete, or export actions. The single-record `DELETE` endpoint above is the only permitted admin mutation.
 
 ---
 
-The frontend is already wired to these three endpoints:
+The frontend is already wired to these four endpoints:
 
 ```text
 POST /api/v1/admin/auth/login
 GET  /api/v1/admin/captures
 GET  /api/v1/admin/captures/{captureId}/photo
+DELETE /api/v1/admin/captures/{captureId}
 ```

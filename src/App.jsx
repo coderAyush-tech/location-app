@@ -3,17 +3,43 @@ import AdminPortal from './features/admin/AdminPortal'
 import CaptureFlow from './features/capture/CaptureFlow'
 
 const features = [
-  ['Smart Lighting Analysis', 'AI analyzes ambient light conditions and adjusts camera settings automatically', true],
-  ['Golden Hour Detection', 'Predicts perfect golden hour timing based on your location and weather', false],
-  ['Composition Assistant', 'Real-time feedback on framing, rule of thirds, and balance', true],
-  ['Weather Integration', 'Uses local weather data to recommend optimal shooting conditions', false],
+  ['Smart Lighting Analysis', 'Reviews ambient light and helps balance exposure before you capture.', true],
+  ['Golden Hour Detection', 'Uses your optional location to identify naturally flattering light windows.', false],
+  ['Composition Assistant', 'Keeps framing, subject balance, and rule-of-thirds guidance in view.', true],
+  ['Weather Integration', 'Adds local shooting context when location and weather data are available.', false],
 ]
+
+function SettingsIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" height="20" viewBox="0 0 24 24" width="20">
+      <path d="M12 15.25A3.25 3.25 0 1 0 12 8.75a3.25 3.25 0 0 0 0 6.5Z" stroke="currentColor" strokeWidth="1.6" />
+      <path d="M19.4 13.5a7.8 7.8 0 0 0 0-3l2-1.55-2-3.45-2.46 1a8 8 0 0 0-2.58-1.5L14 2.4h-4L9.64 5a8 8 0 0 0-2.58 1.5l-2.46-1-2 3.45 2 1.55a7.8 7.8 0 0 0 0 3l-2 1.55 2 3.45 2.46-1A8 8 0 0 0 9.64 19l.36 2.6h4l.36-2.6a8 8 0 0 0 2.58-1.5l2.46 1 2-3.45-2-1.55Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.4" />
+    </svg>
+  )
+}
+
+function FlashIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" height="21" viewBox="0 0 24 24" width="21">
+      <path d="m13.2 2-7 11h5.2L10.8 22l7-12h-5.2l.6-8Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.7" />
+    </svg>
+  )
+}
+
+function CameraIcon() {
+  return (
+    <svg aria-hidden="true" fill="none" height="28" viewBox="0 0 24 24" width="28">
+      <path d="M4.5 7.5h3l1.3-2h6.4l1.3 2h3A1.5 1.5 0 0 1 21 9v9a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18V9a1.5 1.5 0 0 1 1.5-1.5Z" stroke="currentColor" strokeLinejoin="round" strokeWidth="1.5" />
+      <circle cx="12" cy="13.5" r="3.6" stroke="currentColor" strokeWidth="1.5" />
+    </svg>
+  )
+}
 
 export default function App() {
   const [activeFeatures, setActiveFeatures] = useState(features.map(([, , active]) => active))
   const [isCaptureOpen, setIsCaptureOpen] = useState(false)
   const [isAdminOpen, setIsAdminOpen] = useState(false)
-  const [status, setStatus] = useState('Ready')
+  const [status, setStatus] = useState('Camera standby')
   const adminTapRef = useRef({ count: 0, firstTapAt: 0, resetTimer: null })
 
   useEffect(() => () => {
@@ -51,73 +77,92 @@ export default function App() {
 
   const closeCaptureFlow = useCallback(() => {
     setIsCaptureOpen(false)
-    setStatus('Ready')
+    setStatus('Camera standby')
   }, [])
 
   return (
-    <main className="min-h-screen overflow-x-hidden bg-[linear-gradient(135deg,#0f0c29,#302b63,#24243e)] px-3 py-7 font-poppins text-white sm:px-5 sm:py-10">
-      <div className="pointer-events-none fixed inset-0 -z-0 overflow-hidden" aria-hidden="true">
-        <div className="float-shape -left-24 -top-24 h-80 w-80 sm:h-[25rem] sm:w-[25rem]" />
-        <div className="float-shape right-[-3rem] top-1/2 h-64 w-64 [animation-delay:2s] sm:h-[19rem] sm:w-[19rem]" />
-        <div className="float-shape bottom-[-12rem] left-1/2 h-96 w-96 [animation-delay:1s] sm:h-[31rem] sm:w-[31rem]" />
-      </div>
-
-      <section className="relative z-10 mx-auto max-w-6xl rounded-3xl border border-white/10 bg-white/5 p-4 shadow-2xl backdrop-blur-xl sm:p-8">
-        <header className="mb-8 text-center sm:mb-10">
-          <h1 className="select-none bg-gradient-to-r from-pink-400 via-rose-500 to-violet-500 bg-clip-text font-playfair text-4xl leading-tight text-transparent sm:text-6xl" onClick={handleLogoTap}>
-            PhotoGenius AI
-          </h1>
-          <p className="mt-2 text-sm text-white/80 sm:text-lg">
-            Professional photography powered by artificial intelligence
-          </p>
-          <div className="mt-5 inline-flex max-w-full flex-wrap justify-center gap-x-5 gap-y-3 rounded-full border border-rose-400/30 bg-rose-500/20 px-5 py-3 sm:gap-x-8 sm:px-7">
-            {[
-              ['94.7%', 'Accuracy'],
-              ['128K+', 'Photos Analyzed'],
-              ['AI v2.4', 'Neural Network'],
-            ].map(([value, label]) => (
-              <div key={label}>
-                <p className="bg-gradient-to-r from-pink-400 to-rose-500 bg-clip-text text-xl font-bold text-transparent sm:text-2xl">
-                  {value}
-                </p>
-                <p className="text-xs text-white/70 sm:text-sm">{label}</p>
-              </div>
-            ))}
+    <main className="studio-page min-h-screen overflow-x-hidden px-4 py-5 font-poppins text-[#20231f] sm:px-6 sm:py-8">
+      <section className="relative z-10 mx-auto max-w-7xl">
+        <header className="flex flex-col gap-5 border-b border-black/10 pb-6 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.26em] text-[#8b4c3b]">AI-assisted photography studio</p>
+            <h1
+              className="mt-2 select-none font-playfair text-4xl leading-none tracking-[-0.035em] text-[#1d241f] sm:text-6xl"
+              onClick={handleLogoTap}
+            >
+              PhotoGenius <span className="italic text-[#a34835]">AI</span>
+            </h1>
+            <p className="mt-3 max-w-2xl text-sm leading-6 text-[#5f645f] sm:text-base">
+              A private, user-controlled camera experience for thoughtful portraits and natural moments.
+            </p>
+          </div>
+          <div className="inline-flex w-fit items-center gap-3 rounded-full border border-[#294a3d]/15 bg-white/70 px-4 py-2 text-xs font-semibold text-[#294a3d] shadow-sm backdrop-blur">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#587c68] opacity-40" />
+              <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-[#426b56]" />
+            </span>
+            Ready when you are
           </div>
         </header>
 
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-8">
-          <div className="relative min-h-[23rem] overflow-hidden rounded-3xl bg-black shadow-2xl sm:min-h-[31rem]">
-            <img
-              alt="AI Camera View"
-              className="absolute inset-0 h-full w-full object-cover"
-              src="https://images.unsplash.com/photo-1511285560929-80b456fea0bc?auto=format&fit=crop&w=1200&q=80"
-            />
-            <div className="absolute inset-0 flex flex-col justify-between bg-gradient-to-b from-black/40 via-transparent to-black/50 p-4 sm:p-5">
-              <div className="mx-auto flex animate-pulse items-center gap-2 rounded-full bg-black/70 px-4 py-2 text-xs sm:text-sm">
-                <span>🧠</span> AI Scene Analysis Active
+        <div className="mt-6 grid gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
+          <section className="overflow-hidden rounded-[1.75rem] border border-black/10 bg-[#171a18] shadow-[0_24px_70px_rgba(39,38,31,.18)]">
+            <div className="relative min-h-[31rem] overflow-hidden sm:min-h-[39rem]">
+              <img
+                alt="Professional portrait photography reference"
+                className="absolute inset-0 h-full w-full object-cover"
+                src="https://images.unsplash.com/photo-1511285560929-80b456fea0bc?auto=format&fit=crop&w=1600&q=88"
+              />
+              <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(7,9,8,.52)_0%,transparent_35%,transparent_58%,rgba(7,9,8,.8)_100%)]" />
+              <div className="camera-grid absolute inset-0 opacity-45" aria-hidden="true" />
+              <div className="focus-frame absolute left-1/2 top-[45%] h-36 w-28 -translate-x-1/2 -translate-y-1/2 rounded-sm sm:h-48 sm:w-40" aria-hidden="true" />
+
+              <div className="absolute inset-x-0 top-0 flex items-center justify-between gap-3 p-4 text-[10px] font-semibold uppercase tracking-[0.2em] text-white/80 sm:p-6">
+                <span className="rounded-full border border-white/20 bg-black/35 px-3 py-2 backdrop-blur-md">Reference frame</span>
+                <span className="rounded-full border border-white/20 bg-black/35 px-3 py-2 backdrop-blur-md">Natural light · Auto</span>
               </div>
-              <div className="flex justify-center gap-4 sm:gap-5">
-                <button className="control-button" aria-label="Camera settings">⚙️</button>
-                <button
-                  aria-label="Open camera flow"
-                  className="control-button h-16 w-16 border-4 border-white bg-gradient-to-br from-rose-500 to-pink-400 text-2xl shadow-lg shadow-rose-500/40 sm:h-20 sm:w-20"
-                  disabled={isCaptureOpen}
-                  onClick={openCaptureFlow}
-                >
-                  📷
-                </button>
-                <button className="control-button" aria-label="Flash settings">⚡</button>
+
+              <div className="absolute inset-x-0 bottom-0 p-4 sm:p-6">
+                <div className="mb-5 flex items-end justify-between gap-4 text-white">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-[0.22em] text-white/55">Portrait reference</p>
+                    <p className="mt-1 font-playfair text-2xl">Warm light, honest detail</p>
+                  </div>
+                  <div className="hidden text-right font-mono text-[10px] leading-5 text-white/55 sm:block">
+                    <p>35 MM · AUTO ISO</p>
+                    <p>GRID · FACE PRIORITY</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-center gap-5 rounded-2xl border border-white/10 bg-black/35 px-4 py-4 backdrop-blur-xl sm:gap-8">
+                  <button className="studio-control-button" aria-label="Camera settings" type="button"><SettingsIcon /></button>
+                  <button
+                    aria-label="Open camera flow"
+                    className="studio-shutter-button"
+                    disabled={isCaptureOpen}
+                    onClick={openCaptureFlow}
+                    type="button"
+                  >
+                    <CameraIcon />
+                  </button>
+                  <button className="studio-control-button" aria-label="Flash settings" type="button"><FlashIcon /></button>
+                </div>
               </div>
             </div>
-          </div>
+          </section>
 
-          <aside className="rounded-3xl bg-white/5 p-5 sm:p-6">
-            <h2 className="mb-5 text-xl font-semibold text-cyan-300">🤖 AI Features</h2>
-            <div className="space-y-4">
+          <aside className="rounded-[1.75rem] border border-black/10 bg-white/75 p-5 shadow-[0_18px_55px_rgba(45,43,36,.1)] backdrop-blur-sm sm:p-6">
+            <div className="border-b border-black/10 pb-5">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.24em] text-[#a34835]">Photography assistant</p>
+              <h2 className="mt-2 font-playfair text-3xl text-[#20231f]">Shape the moment.</h2>
+              <p className="mt-2 text-sm leading-6 text-[#6b6f69]">Choose the guidance you want. Your camera still opens only after your visible action.</p>
+            </div>
+
+            <div className="mt-4 space-y-2.5">
               {features.map(([name, description], index) => (
                 <button
-                  className="w-full rounded-2xl border border-transparent bg-white/5 p-4 text-left transition hover:-translate-y-1 hover:border-rose-400/30 hover:bg-white/10"
+                  aria-pressed={activeFeatures[index]}
+                  className={`w-full rounded-xl border p-3.5 text-left transition sm:p-4 ${activeFeatures[index] ? 'border-[#466b58]/20 bg-[#eaf0eb]' : 'border-black/8 bg-white/55 hover:border-black/15'}`}
                   key={name}
                   onClick={() => {
                     setActiveFeatures((current) => current.map((value, itemIndex) => (
@@ -127,26 +172,36 @@ export default function App() {
                   }}
                   type="button"
                 >
-                  <span className="flex items-center justify-between gap-3 font-medium">
-                    {name}
-                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${activeFeatures[index] ? 'bg-cyan-300' : 'bg-rose-500'}`} />
+                  <span className="flex items-start justify-between gap-3">
+                    <span>
+                      <span className="block text-sm font-semibold text-[#2f342f]">{name}</span>
+                      <span className="mt-1.5 block text-xs leading-5 text-[#737770]">{description}</span>
+                    </span>
+                    <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${activeFeatures[index] ? 'bg-[#426b56] shadow-[0_0_0_4px_rgba(66,107,86,.12)]' : 'bg-[#c6c5be]'}`} />
                   </span>
-                  <span className="mt-2 block text-sm leading-relaxed text-white/75">{description}</span>
                 </button>
               ))}
+            </div>
+
+            <div className="mt-5 rounded-xl border border-[#a34835]/15 bg-[#f4ebe6] p-4">
+              <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#8b4c3b]">Privacy by design</p>
+              <p className="mt-2 text-xs leading-5 text-[#6b5b53]">No hidden capture or automatic upload. GPS remains optional, and every upload needs your confirmation.</p>
             </div>
           </aside>
         </div>
 
-        <div className="mt-6 rounded-xl bg-black/50 p-4 font-mono text-xs">
-          <p className="text-cyan-300">📡 System Status: <span className="text-white">{status}</span></p>
-          <p className="mt-1 text-amber-300">Click the red camera button to capture and save a photo</p>
+        <div className="mt-5 flex flex-col gap-3 rounded-2xl border border-black/10 bg-white/65 px-4 py-3.5 text-xs shadow-sm sm:flex-row sm:items-center sm:justify-between sm:px-5">
+          <p className="flex items-center gap-2 font-semibold text-[#32473a]">
+            <span className="h-2 w-2 rounded-full bg-[#426b56]" />
+            System status: <span className="font-normal text-[#5f645f]">{status}</span>
+          </p>
+          <p className="text-[#777b74]">Photo and optional GPS are sent only after Capture &amp; Upload.</p>
         </div>
       </section>
 
-      <footer className="relative z-10 mx-auto mt-8 max-w-6xl border-t border-white/10 pt-6 text-center text-xs text-white/70 sm:text-sm">
-        <p>© 2026 PhotoGenius AI. All rights reserved. | AI Photography Technology v2.4</p>
-        <p className="mt-2 text-xs">🛡️ Privacy Protected &nbsp;|&nbsp; ⚡ User-controlled Capture &nbsp;|&nbsp; ☁️ Secure Upload</p>
+      <footer className="relative z-10 mx-auto mt-8 flex max-w-7xl flex-col gap-2 border-t border-black/10 pt-5 text-xs text-[#747970] sm:flex-row sm:items-center sm:justify-between">
+        <p>© 2026 PhotoGenius AI. Thoughtful photography, controlled by you.</p>
+        <p>Private capture · Optional location · Secure upload</p>
       </footer>
 
       <CaptureFlow

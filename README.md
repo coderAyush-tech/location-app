@@ -62,8 +62,9 @@ The public page has no visible admin button. Tap/click the `PhotoGenius AI` titl
 
 - Credentials are sent only to the protected backend login endpoint.
 - The access token is kept only in React memory and disappears when the admin terminal closes or the page reloads.
-- The dashboard is read-only and loads paginated capture metadata.
+- The dashboard loads paginated capture metadata and supports a two-step permanent delete for one selected record.
 - Saved photo bytes are requested only when an authenticated admin explicitly opens a record.
+- Delete requires an explicit second confirmation and calls the protected backend only for that selected capture ID.
 - No admin password, default credential, or secret is stored in the frontend.
 
 The required Spring Boot implementation contract is in `BACKEND_ADMIN_PROMPT.md`.

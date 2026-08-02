@@ -106,3 +106,11 @@ export function fetchAdminCapturePhoto({ token, captureId, signal }) {
     responseType: 'blob',
   })
 }
+
+export function deleteAdminCapture({ token, captureId, signal }) {
+  return adminRequest(`/api/v1/admin/captures/${encodeURIComponent(captureId)}`, {
+    method: 'DELETE',
+    token,
+    signal,
+  })
+}
