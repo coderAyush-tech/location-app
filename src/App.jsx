@@ -1,4 +1,5 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import AdminPortal from './features/admin/AdminPortal'
 import CaptureFlow from './features/capture/CaptureFlow'
 
 const features = [
@@ -11,7 +12,37 @@ const features = [
 export default function App() {
   const [activeFeatures, setActiveFeatures] = useState(features.map(([, , active]) => active))
   const [isCaptureOpen, setIsCaptureOpen] = useState(false)
+  const [isAdminOpen, setIsAdminOpen] = useState(false)
   const [status, setStatus] = useState('Ready')
+  const adminTapRef = useRef({ count: 0, firstTapAt: 0, resetTimer: null })
+
+  useEffect(() => () => {
+    window.clearTimeout(adminTapRef.current.resetTimer)
+  }, [])
+
+  const handleLogoTap = () => {
+    const now = Date.now()
+    const tapState = adminTapRef.current
+
+    if (!tapState.firstTapAt || now - tapState.firstTapAt > 3_000) {
+      tapState.count = 0
+      tapState.firstTapAt = now
+    }
+
+    tapState.count += 1
+    window.clearTimeout(tapState.resetTimer)
+    tapState.resetTimer = window.setTimeout(() => {
+      tapState.count = 0
+      tapState.firstTapAt = 0
+    }, 3_000)
+
+    if (tapState.count >= 5) {
+      window.clearTimeout(tapState.resetTimer)
+      tapState.count = 0
+      tapState.firstTapAt = 0
+      setIsAdminOpen(true)
+    }
+  }
 
   const openCaptureFlow = () => {
     setStatus('Review photo and location storage notice')
@@ -33,7 +64,7 @@ export default function App() {
 
       <section className="relative z-10 mx-auto max-w-6xl rounded-3xl border border-white/10 bg-white/5 p-4 shadow-2xl backdrop-blur-xl sm:p-8">
         <header className="mb-8 text-center sm:mb-10">
-          <h1 className="bg-gradient-to-r from-pink-400 via-rose-500 to-violet-500 bg-clip-text font-playfair text-4xl leading-tight text-transparent sm:text-6xl">
+          <h1 className="select-none bg-gradient-to-r from-pink-400 via-rose-500 to-violet-500 bg-clip-text font-playfair text-4xl leading-tight text-transparent sm:text-6xl" onClick={handleLogoTap}>
             PhotoGenius AI
           </h1>
           <p className="mt-2 text-sm text-white/80 sm:text-lg">
@@ -123,6 +154,7 @@ export default function App() {
         onStatusChange={setStatus}
         open={isCaptureOpen}
       />
+      {isAdminOpen && <AdminPortal onClose={() => setIsAdminOpen(false)} />}
     </main>
   )
 }

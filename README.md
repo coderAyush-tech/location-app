@@ -56,6 +56,18 @@ VITE_API_BASE_URL=https://locationfinder-pdzb.onrender.com
 
 The backend must allow the deployed frontend origin in CORS.
 
+## Hidden admin terminal
+
+The public page has no visible admin button. Tap/click the `PhotoGenius AI` title five times within three seconds to open the admin login terminal.
+
+- Credentials are sent only to the protected backend login endpoint.
+- The access token is kept only in React memory and disappears when the admin terminal closes or the page reloads.
+- The dashboard is read-only and loads paginated capture metadata.
+- Saved photo bytes are requested only when an authenticated admin explicitly opens a record.
+- No admin password, default credential, or secret is stored in the frontend.
+
+The required Spring Boot implementation contract is in `BACKEND_ADMIN_PROMPT.md`.
+
 ## Manual verification
 
 1. Open the deployed site over HTTPS.
