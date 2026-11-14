@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { uploadCapture } from './captureApi'
+import useLiveAudioPublisher from './useLiveAudioPublisher'
 
 const initialCameraState = {
   status: 'idle',
@@ -46,7 +47,10 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
   const permissionRequestRef = useRef(0)
   const cameraTimeoutRef = useRef(null)
   const cameraWaitCancelRef = useRef(null)
+  const audioRecordingRef = useRef(null)
+  const locationPermissionActiveRef = useRef(false)
   const openRef = useRef(open)
+  const liveAudio = useLiveAudioPublisher()
 
   const [phase, setPhase] = useState('consent')
   const [stream, setStream] = useState(null)
@@ -72,9 +76,11 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
 
   const resetFlow = useCallback(() => {
     locationRef.current = null
+    locationPermissionActiveRef.current = false
     setCameraState(initialCameraState)
     setLocationState(initialLocationState)
     setCapturedFile(null)
+    audioRecordingRef.current = null
     setErrorMessage('')
     setSavedResult(null)
     setPhase('consent')
@@ -98,25 +104,28 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
 
   const closeFlow = useCallback(() => {
     invalidateActiveRun()
+    void liveAudio.reset()
     stopCamera()
     resetFlow()
     onClose()
-  }, [invalidateActiveRun, onClose, resetFlow, stopCamera])
+  }, [invalidateActiveRun, liveAudio.reset, onClose, resetFlow, stopCamera])
 
   useEffect(() => {
     if (!open) {
       invalidateActiveRun()
+      void liveAudio.reset()
       stopCamera()
       resetFlow()
     }
-  }, [invalidateActiveRun, open, resetFlow, stopCamera])
+  }, [invalidateActiveRun, liveAudio.reset, open, resetFlow, stopCamera])
 
   useEffect(() => () => {
     permissionRequestRef.current += 1
     cancelPendingCameraWait()
     uploadControllerRef.current?.abort()
+    void liveAudio.stop({ updateState: false, clearRecording: true })
     stopTracks(streamRef.current)
-  }, [cancelPendingCameraWait])
+  }, [cancelPendingCameraWait, liveAudio.stop])
 
   useEffect(() => {
     if (!stream || !videoRef.current) return
@@ -147,8 +156,12 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
 
   const requestOptionalLocation = useCallback(async (requestId) => {
     const isCurrentRun = () => (
-      permissionRequestRef.current === requestId && openRef.current
+      permissionRequestRef.current === requestId
+      && openRef.current
+      && locationPermissionActiveRef.current
     )
+
+    if (!isCurrentRun()) return
 
     if (!navigator.geolocation) {
       if (!isCurrentRun()) return
@@ -242,8 +255,10 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
     cancelPendingCameraWait()
     uploadControllerRef.current?.abort()
     uploadControllerRef.current = null
+    void liveAudio.reset()
     stopCamera()
     locationRef.current = null
+    locationPermissionActiveRef.current = true
     setCameraState({
       status: 'requesting',
       message: 'Requesting camera permission…',
@@ -325,7 +340,12 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
       })
       setPhase('camera')
       onStatusChange('Camera ready — capture when you are ready')
-      void requestOptionalLocation(requestId)
+      void liveAudio.start({
+        isRunActive: () => permissionRequestRef.current === requestId && openRef.current,
+        onMicrophonePermissionSettled: () => {
+          void requestOptionalLocation(requestId)
+        },
+      })
     } catch (error) {
       if (permissionRequestRef.current !== requestId || !openRef.current) return
 
@@ -358,8 +378,16 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
     }
   }
 
-  const performUpload = async (photoFile) => {
+  const performUpload = async (photoFile, audioBlob = audioRecordingRef.current) => {
     const requestId = permissionRequestRef.current
+    await liveAudio.stop({
+      status: 'stopped',
+      message: 'Microphone stopped. The recording is being saved with your photo.',
+    })
+    audioRecordingRef.current = audioBlob || null
+
+    if (permissionRequestRef.current !== requestId || !openRef.current) return
+
     const controller = new AbortController()
     uploadControllerRef.current = controller
     setErrorMessage('')
@@ -369,6 +397,7 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
     try {
       const result = await uploadCapture({
         photoFile,
+        audioBlob: audioRecordingRef.current,
         location: locationRef.current,
         signal: controller.signal,
       })
@@ -401,6 +430,7 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
 
   const captureAndUpload = async () => {
     const requestId = permissionRequestRef.current
+    locationPermissionActiveRef.current = false
     const video = videoRef.current
 
     if (!video || video.readyState < 2 || !video.videoWidth || !video.videoHeight) {
@@ -440,12 +470,19 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
     )
 
     setCapturedFile(photoFile)
+    const audioBlob = await liveAudio.stop({
+      status: 'stopped',
+      message: 'Microphone stopped for photo upload. The recording will be saved with your photo.',
+    })
+    if (permissionRequestRef.current !== requestId || !openRef.current) return
+    audioRecordingRef.current = audioBlob || null
     stopCamera()
-    await performUpload(photoFile)
+    await performUpload(photoFile, audioBlob)
   }
 
   const startAgain = () => {
     invalidateActiveRun()
+    void liveAudio.reset()
     stopCamera()
     resetFlow()
     onStatusChange('Ready to open camera')
@@ -491,19 +528,23 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
               <div>
                 <h3 className="text-2xl font-semibold text-white">Your permission comes first</h3>
                 <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-slate-300 sm:text-base">
-                  The photo you choose to capture and your GPS location, when allowed, will be
-                  sent to the backend and saved in the database. If GPS is denied or times out,
-                  no GPS fields are sent and the backend can use its Geo-IP/raw-IP fallback.
+                  After you agree, your camera preview is shown and your microphone audio is
+                  streamed live to the administrator while the mic is on. When you press Capture
+                  &amp; Upload, the photo and up to 60 seconds of the recording are sent together
+                  to the backend and saved. GPS is optional; if unavailable, the backend uses its
+                  IP fallback.
                 </p>
               </div>
               <div className="rounded-2xl border border-cyan-400/20 bg-cyan-400/5 p-4 text-left text-sm leading-6 text-cyan-100">
-                Nothing is captured or uploaded automatically. Camera and location permissions
-                start only after you press <strong>Open Camera</strong>, and uploading starts only
-                after you press <strong>Capture &amp; Upload</strong>.
+                Nothing starts on page load. Camera and microphone permissions are requested only
+                after you press <strong>I agree / Start camera and mic</strong>. The live audio
+                indicator stays visible while an administrator can hear you. Press Stop to end
+                live audio; nothing is captured or uploaded as a photo until you press
+                <strong> Capture &amp; Upload</strong>.
               </div>
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-center">
                 <button className="capture-button-secondary" onClick={closeFlow} type="button">Cancel</button>
-                <button className="capture-button-primary" onClick={openCamera} type="button">Open Camera</button>
+                <button className="capture-button-primary" onClick={openCamera} type="button">I agree / Start camera and mic</button>
               </div>
             </div>
           )}
@@ -543,6 +584,31 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
                   <span className="mt-1 block">{locationState.message}</span>
                 </div>
               </div>
+              <div
+                aria-live={liveAudio.audioState.status === 'live' ? 'assertive' : 'polite'}
+                className={`flex flex-col gap-3 rounded-xl border px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between ${liveAudio.audioState.status === 'live' ? 'border-rose-400/50 bg-rose-500/15 text-rose-100 shadow-[0_0_25px_rgba(244,63,94,.12)]' : ['denied', 'disconnected', 'unavailable', 'limit', 'cleanup-warning'].includes(liveAudio.audioState.status) ? 'border-amber-400/30 bg-amber-400/10 text-amber-100' : 'border-white/10 bg-white/5 text-slate-200'}`}
+                role="status"
+              >
+                <div className="flex items-center gap-3">
+                  {liveAudio.audioState.status === 'live' && <span aria-hidden="true" className="h-2.5 w-2.5 animate-pulse rounded-full bg-rose-400" />}
+                  <div>
+                    <span className="block text-[10px] font-semibold uppercase tracking-[0.18em] opacity-70">Microphone</span>
+                    <span className="mt-1 block font-semibold">
+                      {liveAudio.audioState.status === 'live' ? 'MIC LIVE — admin can hear' : liveAudio.audioState.message}
+                    </span>
+                    {liveAudio.audioState.status === 'live' && <span className="mt-1 block text-xs font-normal opacity-80">Recording is limited to 60 seconds or 2 MiB and will be saved with the photo.</span>}
+                  </div>
+                </div>
+                {['live', 'requesting', 'connecting'].includes(liveAudio.audioState.status) && (
+                  <button
+                    className="capture-button-secondary shrink-0 border-rose-300/30 text-rose-100 hover:bg-rose-400/10"
+                    onClick={() => { void liveAudio.stop({ status: 'stopped', message: 'Microphone stopped. The recording will be included with your photo.' }) }}
+                    type="button"
+                  >
+                    Stop microphone
+                  </button>
+                )}
+              </div>
               {errorMessage && (
                 <p className="rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">
                   {errorMessage}
@@ -571,6 +637,11 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
                 <h3 className="text-2xl font-semibold">Photo saved successfully</h3>
                 <p className="mt-2 text-sm leading-6 text-slate-300">
                   The server returned status 201 and confirmed <code>saved: true</code>.
+                </p>
+                <p className={`mt-2 text-sm ${savedResult?.audioSaved ? 'text-emerald-200' : 'text-amber-200'}`}>
+                  {audioRecordingRef.current
+                    ? `Recording ${savedResult?.audioSaved === true ? 'saved with this photo.' : 'was not saved by the backend.'}`
+                    : 'No audio recording was attached.'}
                 </p>
                 {savedResult?.id && <p className="mt-2 text-xs text-slate-400">Capture ID: {savedResult.id}</p>}
               </div>

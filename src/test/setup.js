@@ -11,8 +11,19 @@ Object.defineProperty(HTMLMediaElement.prototype, 'play', {
   value: vi.fn().mockResolvedValue(undefined),
 })
 
+Object.defineProperty(HTMLMediaElement.prototype, 'pause', {
+  configurable: true,
+  value: vi.fn(),
+})
+
+Object.defineProperty(HTMLMediaElement.prototype, 'load', {
+  configurable: true,
+  value: vi.fn(),
+})
+
 afterEach(() => {
   cleanup()
   vi.restoreAllMocks()
+  vi.unstubAllGlobals()
   vi.useRealTimers()
 })

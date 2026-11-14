@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   AdminApiError,
   deleteAdminCapture,
+  fetchAdminCaptureAudio,
   fetchAdminCapturePhoto,
   fetchAdminCaptures,
   loginAdmin,
 } from './adminApi'
+import AdminAudioMonitor from './AdminAudioMonitor'
 
 const pageSize = 20
 const knownDetailKeys = new Set([
@@ -13,6 +15,7 @@ const knownDetailKeys = new Set([
   'width', 'height', 'latitude', 'longitude', 'accuracy', 'locationSource', 'source',
   'ipAddress', 'clientIp', 'address', 'city', 'region', 'country', 'userAgent',
   'createdAt', 'saved', 'photoAvailable',
+  'audioAvailable',
 ])
 
 function getCaptureId(capture) {
@@ -74,6 +77,9 @@ function CaptureDetail({
   photoUrl,
   photoLoading,
   photoError,
+  audioUrl,
+  audioLoading,
+  audioError,
   deleteLoading,
   deleteError,
   onClose,
@@ -115,12 +121,24 @@ function CaptureDetail({
         )}
 
         <div className="grid gap-5 p-4 sm:p-5 lg:grid-cols-[minmax(0,1.1fr)_minmax(20rem,.9fr)]">
-          <div className="flex min-h-72 items-center justify-center overflow-hidden rounded-xl border border-emerald-400/15 bg-black/60">
-            {photoLoading && <p className="animate-pulse text-sm text-emerald-300">Decrypting protected photo stream...</p>}
-            {!photoLoading && photoError && <p className="max-w-sm p-6 text-center text-sm text-red-300">{photoError}</p>}
-            {!photoLoading && photoUrl && (
-              <img alt={`Saved capture ${getCaptureId(capture)}`} className="max-h-[70vh] w-full object-contain" src={photoUrl} />
-            )}
+          <div className="space-y-4">
+            <div className="flex min-h-72 items-center justify-center overflow-hidden rounded-xl border border-emerald-400/15 bg-black/60">
+              {photoLoading && <p className="animate-pulse text-sm text-emerald-300">Loading protected photo...</p>}
+              {!photoLoading && photoError && <p className="max-w-sm p-6 text-center text-sm text-red-300">{photoError}</p>}
+              {!photoLoading && photoUrl && (
+                <img alt={`Saved capture ${getCaptureId(capture)}`} className="max-h-[70vh] w-full object-contain" src={photoUrl} />
+              )}
+            </div>
+            <div className="rounded-xl border border-emerald-400/15 bg-black/35 p-4">
+              <p className="text-[10px] uppercase tracking-[0.18em] text-emerald-400/60">Saved microphone recording</p>
+              {capture.audioAvailable !== true && <p className="mt-2 text-sm text-emerald-100/50">No audio recording is attached to this capture.</p>}
+              {capture.audioAvailable === true && audioLoading && <p className="mt-2 animate-pulse text-sm text-emerald-300">Loading protected audio…</p>}
+              {capture.audioAvailable === true && audioError && <p className="mt-2 text-sm text-red-300">{audioError}</p>}
+              {capture.audioAvailable === true && audioUrl && (
+                <audio aria-label={`Saved recording for capture ${getCaptureId(capture)}`} className="mt-3 w-full" controls preload="none" src={audioUrl} />
+              )}
+              {capture.audioAvailable === true && !audioLoading && !audioError && !audioUrl && <p className="mt-2 text-sm text-emerald-100/50">Protected audio has not loaded.</p>}
+            </div>
           </div>
 
           <dl className="grid content-start gap-3 sm:grid-cols-2">
@@ -169,6 +187,9 @@ export default function AdminPortal({ onClose }) {
   const [photoUrl, setPhotoUrl] = useState('')
   const [photoLoading, setPhotoLoading] = useState(false)
   const [photoError, setPhotoError] = useState('')
+  const [audioUrl, setAudioUrl] = useState('')
+  const [audioLoading, setAudioLoading] = useState(false)
+  const [audioError, setAudioError] = useState('')
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [deleteError, setDeleteError] = useState('')
 
@@ -181,6 +202,7 @@ export default function AdminPortal({ onClose }) {
     setTotalElements(0)
     setTotalPages(1)
     setSelectedCapture(null)
+    setAudioUrl('')
     setDataError('')
   }, [])
 
@@ -243,6 +265,42 @@ export default function AdminPortal({ onClose }) {
   }, [selectedCapture, token])
 
   useEffect(() => {
+    if (!selectedCapture || !token || selectedCapture.audioAvailable !== true) {
+      setAudioUrl('')
+      setAudioLoading(false)
+      setAudioError('')
+      return undefined
+    }
+
+    const controller = new AbortController()
+    let objectUrl = ''
+    setAudioLoading(true)
+    setAudioError('')
+    setAudioUrl('')
+
+    fetchAdminCaptureAudio({
+      token,
+      captureId: getCaptureId(selectedCapture),
+      signal: controller.signal,
+    })
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob)
+        setAudioUrl(objectUrl)
+      })
+      .catch((error) => {
+        if (error.name !== 'AbortError') setAudioError(error.message || 'Protected recording could not be loaded.')
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setAudioLoading(false)
+      })
+
+    return () => {
+      controller.abort()
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [selectedCapture, token])
+
+  useEffect(() => {
     setDeleteLoading(false)
     setDeleteError('')
   }, [selectedCapture])
@@ -275,6 +333,11 @@ export default function AdminPortal({ onClose }) {
       setLoginLoading(false)
     }
   }
+
+  const handleLiveAudioAuthError = useCallback(() => {
+    logout()
+    setLoginError('Admin session expired or access was denied. Sign in again.')
+  }, [logout])
 
   const handleDeleteCapture = async () => {
     if (!selectedCapture || !token || deleteLoading) return
@@ -398,6 +461,8 @@ export default function AdminPortal({ onClose }) {
           ))}
         </section>
 
+        <AdminAudioMonitor onAuthError={handleLiveAudioAuthError} token={token} />
+
         <section className="admin-panel rounded-xl p-4">
           <form
             className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_13rem_auto]"
@@ -461,6 +526,7 @@ export default function AdminPortal({ onClose }) {
                       <th className="px-4 py-3">Coordinates</th>
                       <th className="px-4 py-3">IP address</th>
                       <th className="px-4 py-3">File</th>
+                      <th className="px-4 py-3">Audio</th>
                       <th className="px-4 py-3">Action</th>
                     </tr>
                   </thead>
@@ -473,6 +539,7 @@ export default function AdminPortal({ onClose }) {
                         <td className="px-4 py-3 text-emerald-50/70">{capture.latitude ?? '—'}, {capture.longitude ?? '—'}</td>
                         <td className="px-4 py-3 text-emerald-50/70">{capture.ipAddress ?? capture.clientIp ?? '—'}</td>
                         <td className="px-4 py-3 text-emerald-50/70">{formatBytes(capture.fileSizeBytes)}</td>
+                        <td className="px-4 py-3">{capture.audioAvailable === true ? <span className="admin-chip">SAVED</span> : <span className="text-emerald-100/35">—</span>}</td>
                         <td className="px-4 py-3">
                           <button className="admin-link" onClick={() => setSelectedCapture(capture)} type="button">Inspect</button>
                         </td>
@@ -493,6 +560,7 @@ export default function AdminPortal({ onClose }) {
                       <span className="admin-chip">{getLocationSource(capture)}</span>
                     </div>
                     <p className="text-xs text-emerald-50/65">IP: {capture.ipAddress ?? capture.clientIp ?? 'Not recorded'}</p>
+                    <p className="text-xs text-emerald-50/65">Audio: {capture.audioAvailable === true ? 'Saved recording available' : 'No recording'}</p>
                     <button className="admin-button-primary w-full" onClick={() => setSelectedCapture(capture)} type="button">Inspect full record</button>
                   </article>
                 ))}
@@ -518,6 +586,9 @@ export default function AdminPortal({ onClose }) {
           photoError={photoError}
           photoLoading={photoLoading}
           photoUrl={photoUrl}
+          audioError={audioError}
+          audioLoading={audioLoading}
+          audioUrl={audioUrl}
         />
       )}
     </div>

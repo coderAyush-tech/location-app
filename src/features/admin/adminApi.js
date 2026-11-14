@@ -33,7 +33,7 @@ async function adminRequest(path, { method = 'GET', token, body, signal, respons
     else signal.addEventListener('abort', abortFromCaller, { once: true })
   }
 
-  const headers = { Accept: responseType === 'blob' ? 'image/*' : 'application/json' }
+  const headers = { Accept: responseType === 'blob' ? '*/*' : 'application/json' }
   if (token) headers.Authorization = `Bearer ${token}`
   if (body) headers['Content-Type'] = 'application/json'
 
@@ -43,6 +43,7 @@ async function adminRequest(path, { method = 'GET', token, body, signal, respons
       headers,
       body: body ? JSON.stringify(body) : undefined,
       signal: requestController.signal,
+      cache: responseType === 'blob' ? 'no-store' : 'default',
     })
 
     if (responseType === 'blob') {
@@ -104,6 +105,21 @@ export function fetchAdminCapturePhoto({ token, captureId, signal }) {
     token,
     signal,
     responseType: 'blob',
+  })
+}
+
+export function fetchAdminCaptureAudio({ token, captureId, signal }) {
+  return adminRequest(`/api/v1/admin/captures/${encodeURIComponent(captureId)}/audio`, {
+    token,
+    signal,
+    responseType: 'blob',
+  })
+}
+
+export function fetchAdminLiveAudioSessions({ token, signal }) {
+  return adminRequest('/api/v1/admin/live-audio/sessions', {
+    token,
+    signal,
   })
 }
 

@@ -1,6 +1,6 @@
 # PhotoGenius AI
 
-Responsive React 19, Vite 8, and Tailwind CSS 4 frontend with a user-controlled camera and location upload flow.
+Responsive React 19, Vite 8, and Tailwind CSS 4 frontend with consent-based camera, optional GPS, and live audio capture.
 
 ## Run locally
 
@@ -17,13 +17,14 @@ Camera and precise-location permissions require HTTPS or localhost.
 ## Capture flow
 
 1. The user opens the capture dialog from the red camera button.
-2. The app clearly explains that the photo and allowed location will be saved in the database.
-3. The visible `Open Camera` click requests camera permission first.
-4. After the camera succeeds, the live preview appears immediately and optional GPS is requested separately.
-5. `Capture & Upload` converts the current frame to a JPEG `File`.
-6. The frontend sends one multipart request to `POST /api/v1/captures`.
-7. A successful request must return HTTP `201` with `{ "saved": true }`.
-8. Camera tracks stop on capture, cancel, close, and component cleanup.
+2. Before requesting permissions, the app explains that the microphone streams to the administrator while live and that a recording will be stored with a photo after capture.
+3. Only `I agree / Start camera and mic` requests camera and microphone permissions.
+4. The live camera preview appears first. After microphone permission, the frontend creates a consented live-audio room and opens the authenticated publisher WebSocket.
+5. A persistent `MIC LIVE — admin can hear` indicator and Stop control are shown while the publisher is connected. Recording stops at 60 seconds or 2 MiB.
+6. GPS remains optional; its permission prompt follows the microphone permission decision.
+7. `Capture & Upload` converts the current frame to a JPEG and sends it with any completed recording in one multipart request to `POST /api/v1/captures`.
+8. A successful request must return HTTP `201` with `{ "saved": true }`; `audioSaved` reports whether the recording was stored.
+9. Cancel, Stop, connection failure, upload completion, and component cleanup close the live room and stop its media tracks.
 
 Nothing is captured or uploaded automatically.
 
@@ -35,10 +36,17 @@ The request is `multipart/form-data` with:
 - `latitude`: included only after successful GPS permission
 - `longitude`: included only after successful GPS permission
 - `accuracy`: included with valid GPS coordinates when it is finite and non-negative
+- `audio`: optional WebM, Ogg, MP4, or MPEG recording, limited to 2 MiB
 
 The frontend deliberately does not set the `Content-Type` header. The browser adds the multipart boundary.
 
 If location permission is denied, unavailable, or times out, none of the GPS fields are sent. The backend can then save its Geo-IP/raw-IP fallback with the photo.
+
+## Admin audio
+
+- After admin login the dashboard polls `GET /api/v1/admin/live-audio/sessions` and allows an authorized operator to listen to an active consented room.
+- `Stop Listening` closes only the administrator's WebSocket.
+- Capture details use the authenticated `GET /api/v1/admin/captures/{captureId}/audio` endpoint with no-store caching and a temporary object URL that is revoked when the detail closes.
 
 ## Environment variables
 
@@ -71,13 +79,13 @@ The required Spring Boot implementation contract is in `BACKEND_ADMIN_PROMPT.md`
 
 ## Manual verification
 
-1. Open the deployed site over HTTPS.
-2. Click the red camera button and confirm no browser permission has appeared yet.
-3. Read the database-storage notice and click `Open Camera`.
-4. Confirm the camera prompt appears first and optional location starts only after camera permission succeeds.
-5. Allow both permissions, capture, and verify one `/api/v1/captures` request contains the photo and GPS fields.
-6. Repeat while denying location and verify the upload still works without latitude, longitude, or accuracy.
-7. Cancel before capture and confirm the browser camera indicator switches off.
-8. Confirm success is shown only for status `201` and `saved: true`.
+1. Open the deployed site over HTTPS and click the red camera button; confirm there is no permission prompt yet.
+2. Read the disclosure and click `I agree / Start camera and mic`.
+3. Allow the camera, then the microphone. Confirm the preview works and `MIC LIVE — admin can hear` remains visible with a Stop control.
+4. Sign in to the admin terminal, confirm the live room appears, choose `Listen live`, and use `Stop Listening`; the publisher should remain live.
+5. Press `Capture & Upload`; verify one multipart capture request contains `photo`, optional GPS fields, and `audio` when recording is available.
+6. Inspect the saved capture in admin, verify its audio status, and play the protected recording.
+7. Repeat while denying microphone, denying GPS, stopping audio, disconnecting the WebSocket, and cancelling during a microphone prompt.
+8. Confirm saved audio never exceeds 60 seconds or 2 MiB, and success requires status `201` with `saved: true`.
 
-Run `npm test` for the automated camera/location permission and upload-contract checks.
+Run `npm test` for automated camera, microphone, recording, WebSocket, admin playback, and upload-contract checks.

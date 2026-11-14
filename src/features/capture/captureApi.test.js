@@ -62,6 +62,31 @@ describe('capture upload API contract', () => {
     expect(Array.from(fetch.mock.calls[0][1].body.keys())).toEqual(['photo'])
   })
 
+  it('adds a recording under audio using its source MIME type and filename', async () => {
+    fetch.mockResolvedValue(jsonResponse({ body: { audioSaved: true, saved: true } }))
+    const photoFile = new File(['photo'], 'camera.jpg', { type: 'image/jpeg' })
+    const audioBlob = new Blob(['recording'], { type: 'audio/webm;codecs=opus' })
+
+    await uploadCapture({ photoFile, audioBlob, location: null })
+
+    const [url, options] = fetch.mock.calls[0]
+    const formData = options.body
+    expect(url).toBe('https://locationfinder-pdzb.onrender.com/api/v1/captures')
+    expect(options.method).toBe('POST')
+    expect(options.headers).toBeUndefined()
+    expect(Array.from(formData.keys())).toEqual(['photo', 'audio'])
+    expect(formData.get('audio').name).toBe('recording.webm')
+    expect(formData.get('audio').type).toBe('audio/webm;codecs=opus')
+  })
+
+  it('rejects audio formats not accepted by the backend', async () => {
+    const photoFile = new File(['photo'], 'camera.jpg', { type: 'image/jpeg' })
+    const audioBlob = new Blob(['recording'], { type: 'audio/wav' })
+
+    await expect(uploadCapture({ photoFile, audioBlob })).rejects.toThrow('not supported')
+    expect(fetch).not.toHaveBeenCalled()
+  })
+
   it('accepts success only for HTTP 201 with saved true', async () => {
     const photoFile = new File(['photo'], 'camera.jpg', { type: 'image/jpeg' })
     fetch.mockResolvedValueOnce(jsonResponse({ body: { saved: true }, status: 200 }))
