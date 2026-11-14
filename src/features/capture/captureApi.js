@@ -1,8 +1,6 @@
 import { apiConfig, apiUrl } from '../../config/api'
-import { audioFilename } from './liveAudioApi'
 
 const supportedPhotoTypes = new Set(['image/jpeg', 'image/png', 'image/webp'])
-const supportedAudioTypes = new Set(['audio/webm', 'audio/ogg', 'audio/mp4', 'audio/mpeg'])
 
 function parseResponse(responseText) {
   if (!responseText) return {}
@@ -18,21 +16,20 @@ function uploadError(result, fallback) {
   return result.message || result.detail || result.title || fallback
 }
 
-export async function uploadCapture({ photoFile, audioBlob, location, signal }) {
+export async function uploadCapture({ photoFile, recordingSessionId, publishToken, location, signal }) {
   if (!(photoFile instanceof File) || !supportedPhotoTypes.has(photoFile.type)) {
     throw new Error('Please capture a valid JPEG, PNG, or WebP photo.')
+  }
+  if (!recordingSessionId || !publishToken) {
+    throw new Error('Start the consented live recording before capturing and uploading a photo.')
   }
 
   const formData = new FormData()
   formData.append('photo', photoFile)
-
-  if (audioBlob?.size) {
-    const audioType = audioBlob.type?.split(';', 1)[0].trim().toLowerCase()
-    if (!(audioBlob instanceof Blob) || !supportedAudioTypes.has(audioType)) {
-      throw new Error('The recording format is not supported by the capture backend.')
-    }
-    formData.append('audio', audioBlob, audioFilename(audioBlob.type))
-  }
+  formData.append('recordingSessionId', recordingSessionId)
+  formData.append('publishToken', publishToken)
+  formData.append('cameraConsentConfirmed', 'true')
+  formData.append('microphoneConsentConfirmed', 'true')
 
   const hasCoordinates = location
     && Number.isFinite(location.latitude)
@@ -71,8 +68,8 @@ export async function uploadCapture({ photoFile, audioBlob, location, signal }) 
       throw new Error(uploadError(result, 'Upload failed'))
     }
 
-    if (response.status !== 201 || result.saved !== true) {
-      throw new Error('The server did not confirm that the photo was saved.')
+    if (response.status !== 201 || result.saved !== true || result.videoSaved !== true) {
+      throw new Error('The server did not confirm that the photo and live recording were saved.')
     }
 
     return result

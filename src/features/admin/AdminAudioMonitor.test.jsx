@@ -29,7 +29,7 @@ function installAdminAudioRuntime() {
   }
 
   class MockMediaSource extends EventTarget {
-    static isTypeSupported = (type) => type.includes('audio/webm')
+    static isTypeSupported = (type) => type.includes('video/webm') && type.includes('vp8,opus')
 
     constructor() {
       super()
@@ -69,7 +69,7 @@ function installAdminAudioRuntime() {
   return { mediaSources, sockets }
 }
 
-describe('admin live audio monitor', () => {
+describe('admin live video monitor', () => {
   beforeEach(() => {
     fetchAdminLiveAudioSessions.mockReset()
     fetchAdminLiveAudioSessions.mockResolvedValue([
@@ -77,15 +77,15 @@ describe('admin live audio monitor', () => {
     ])
   })
 
-  it('plays publisher binary frames and Stop Listening closes only the admin socket', async () => {
+  it('plays publisher binary video frames and Stop Listening closes only the admin socket', async () => {
     const runtime = installAdminAudioRuntime()
     const onAuthError = vi.fn()
     render(<AdminAudioMonitor onAuthError={onAuthError} token="admin-token" />)
 
     expect(await screen.findByText('room-1')).toBeTruthy()
     expect(fetchAdminLiveAudioSessions).toHaveBeenCalledWith(expect.objectContaining({ token: 'admin-token' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Listen live' }))
-    expect(await screen.findByText(/Connected\. Waiting for live audio/)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'View live' }))
+    expect(await screen.findByText(/Connected\. Waiting for live camera and microphone data/)).toBeTruthy()
 
     expect(runtime.sockets[0].url).toBe('wss://locationfinder-pdzb.onrender.com/ws/live-audio')
     expect(JSON.parse(runtime.sockets[0].sent[0])).toEqual({
@@ -94,15 +94,16 @@ describe('admin live audio monitor', () => {
       sessionId: 'room-1',
     })
 
-    const audioFrame = new Uint8Array([1, 2, 3, 4]).buffer
-    act(() => runtime.sockets[0].onmessage({ data: audioFrame }))
+    const videoFrame = new Uint8Array([1, 2, 3, 4]).buffer
+    act(() => runtime.sockets[0].onmessage({ data: videoFrame }))
     await waitFor(() => expect(runtime.mediaSources[0].buffer.appended).toHaveLength(1))
-    expect(screen.getByText('Live audio is playing from the consented room.')).toBeTruthy()
+    expect(screen.getByText('Live camera video and microphone audio are playing.')).toBeTruthy()
+    expect(screen.getByLabelText('Live camera and microphone player')).toBeTruthy()
 
     fireEvent.click(screen.getByRole('button', { name: 'Stop Listening' }))
     expect(runtime.sockets[0].closeCalled).toBe(true)
     expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:live-room')
-    expect(screen.getByText(/publisher microphone remains live/)).toBeTruthy()
+    expect(screen.getByText(/publisher recording remains active/)).toBeTruthy()
     expect(onAuthError).not.toHaveBeenCalled()
   })
 })

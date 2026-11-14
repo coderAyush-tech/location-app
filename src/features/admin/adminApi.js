@@ -116,6 +116,14 @@ export function fetchAdminCaptureAudio({ token, captureId, signal }) {
   })
 }
 
+export function fetchAdminCaptureVideo({ token, captureId, signal }) {
+  return adminRequest(`/api/v1/admin/captures/${encodeURIComponent(captureId)}/video`, {
+    token,
+    signal,
+    responseType: 'blob',
+  })
+}
+
 export function fetchAdminLiveAudioSessions({ token, signal }) {
   return adminRequest('/api/v1/admin/live-audio/sessions', {
     token,

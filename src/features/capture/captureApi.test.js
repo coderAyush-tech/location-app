@@ -9,93 +9,75 @@ function jsonResponse({ body, status = 201 }) {
   }
 }
 
-describe('capture upload API contract', () => {
-  beforeEach(() => {
-    vi.stubGlobal('fetch', vi.fn())
-  })
+describe('live video capture upload API contract', () => {
+  beforeEach(() => { vi.stubGlobal('fetch', vi.fn()) })
+  afterEach(() => { vi.unstubAllGlobals() })
 
-  afterEach(() => {
-    vi.unstubAllGlobals()
-  })
-
-  it('sends only the photo when GPS is missing and does not set Content-Type', async () => {
-    fetch.mockResolvedValue(jsonResponse({ body: { id: 'one', saved: true } }))
-    const photoFile = new File(['photo'], 'camera.jpg', { type: 'image/jpeg' })
-
-    await uploadCapture({ photoFile, location: null })
-
-    const [url, options] = fetch.mock.calls[0]
-    expect(url).toBe('https://locationfinder-pdzb.onrender.com/api/v1/captures')
-    expect(options.method).toBe('POST')
-    expect(options.headers).toBeUndefined()
-    expect(Array.from(options.body.keys())).toEqual(['photo'])
-    expect(options.body.get('photo')).toBe(photoFile)
-  })
-
-  it('sends all GPS fields only when coordinates are valid', async () => {
-    fetch.mockResolvedValue(jsonResponse({ body: { saved: true } }))
+  it('sends photo, current-session credentials, explicit consent, and valid GPS without setting multipart Content-Type', async () => {
+    fetch.mockResolvedValue(jsonResponse({ body: { id: 'one', saved: true, videoSaved: true, videoReady: false } }))
     const photoFile = new File(['photo'], 'camera.jpg', { type: 'image/jpeg' })
 
     await uploadCapture({
       photoFile,
+      recordingSessionId: 'room-1',
+      publishToken: 'temporary-token',
       location: { accuracy: 9.5, latitude: 28.6, longitude: 77.2 },
     })
 
-    const formData = fetch.mock.calls[0][1].body
-    expect(Array.from(formData.keys())).toEqual([
-      'photo',
-      'latitude',
-      'longitude',
-      'accuracy',
-    ])
-    expect(formData.get('latitude')).toBe('28.6')
-    expect(formData.get('longitude')).toBe('77.2')
-    expect(formData.get('accuracy')).toBe('9.5')
-  })
-
-  it('never sends accuracy without latitude and longitude', async () => {
-    fetch.mockResolvedValue(jsonResponse({ body: { saved: true } }))
-    const photoFile = new File(['photo'], 'camera.jpg', { type: 'image/jpeg' })
-
-    await uploadCapture({ photoFile, location: { accuracy: 5 } })
-
-    expect(Array.from(fetch.mock.calls[0][1].body.keys())).toEqual(['photo'])
-  })
-
-  it('adds a recording under audio using its source MIME type and filename', async () => {
-    fetch.mockResolvedValue(jsonResponse({ body: { audioSaved: true, saved: true } }))
-    const photoFile = new File(['photo'], 'camera.jpg', { type: 'image/jpeg' })
-    const audioBlob = new Blob(['recording'], { type: 'audio/webm;codecs=opus' })
-
-    await uploadCapture({ photoFile, audioBlob, location: null })
-
     const [url, options] = fetch.mock.calls[0]
-    const formData = options.body
     expect(url).toBe('https://locationfinder-pdzb.onrender.com/api/v1/captures')
     expect(options.method).toBe('POST')
     expect(options.headers).toBeUndefined()
-    expect(Array.from(formData.keys())).toEqual(['photo', 'audio'])
-    expect(formData.get('audio').name).toBe('recording.webm')
-    expect(formData.get('audio').type).toBe('audio/webm;codecs=opus')
+    expect(Array.from(options.body.keys())).toEqual([
+      'photo', 'recordingSessionId', 'publishToken', 'cameraConsentConfirmed',
+      'microphoneConsentConfirmed', 'latitude', 'longitude', 'accuracy',
+    ])
+    expect(options.body.get('photo')).toBe(photoFile)
+    expect(options.body.get('recordingSessionId')).toBe('room-1')
+    expect(options.body.get('publishToken')).toBe('temporary-token')
+    expect(options.body.get('cameraConsentConfirmed')).toBe('true')
+    expect(options.body.get('microphoneConsentConfirmed')).toBe('true')
+    expect(options.body.get('accuracy')).toBe('9.5')
+    expect(options.body.has('video')).toBe(false)
+    expect(options.body.has('audio')).toBe(false)
   })
 
-  it('rejects audio formats not accepted by the backend', async () => {
+  it('omits every GPS field if location is missing or invalid', async () => {
+    fetch.mockResolvedValue(jsonResponse({ body: { saved: true, videoSaved: true, videoReady: false } }))
     const photoFile = new File(['photo'], 'camera.jpg', { type: 'image/jpeg' })
-    const audioBlob = new Blob(['recording'], { type: 'audio/wav' })
 
-    await expect(uploadCapture({ photoFile, audioBlob })).rejects.toThrow('not supported')
+    await uploadCapture({ photoFile, recordingSessionId: 'room-1', publishToken: 'token', location: null })
+    expect(Array.from(fetch.mock.calls[0][1].body.keys())).toEqual([
+      'photo', 'recordingSessionId', 'publishToken', 'cameraConsentConfirmed', 'microphoneConsentConfirmed',
+    ])
+
+    await uploadCapture({
+      photoFile,
+      recordingSessionId: 'room-1',
+      publishToken: 'token',
+      location: { accuracy: 4 },
+    })
+    expect(Array.from(fetch.mock.calls[1][1].body.keys())).toEqual([
+      'photo', 'recordingSessionId', 'publishToken', 'cameraConsentConfirmed', 'microphoneConsentConfirmed',
+    ])
+  })
+
+  it('requires a session and publish token and never sends accumulated video/audio blobs', async () => {
+    const photoFile = new File(['photo'], 'camera.jpg', { type: 'image/jpeg' })
+    await expect(uploadCapture({ photoFile })).rejects.toThrow('Start the consented live recording')
     expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('accepts success only for HTTP 201 with saved true', async () => {
+  it('accepts success only when HTTP 201, saved, and videoSaved are confirmed', async () => {
     const photoFile = new File(['photo'], 'camera.jpg', { type: 'image/jpeg' })
-    fetch.mockResolvedValueOnce(jsonResponse({ body: { saved: true }, status: 200 }))
-    await expect(uploadCapture({ photoFile })).rejects.toThrow('did not confirm')
+    const credentials = { recordingSessionId: 'room-1', publishToken: 'token' }
+    fetch.mockResolvedValueOnce(jsonResponse({ body: { saved: true, videoSaved: true }, status: 200 }))
+    await expect(uploadCapture({ photoFile, ...credentials })).rejects.toThrow('did not confirm')
 
-    fetch.mockResolvedValueOnce(jsonResponse({ body: { saved: false }, status: 201 }))
-    await expect(uploadCapture({ photoFile })).rejects.toThrow('did not confirm')
+    fetch.mockResolvedValueOnce(jsonResponse({ body: { saved: true, videoSaved: false }, status: 201 }))
+    await expect(uploadCapture({ photoFile, ...credentials })).rejects.toThrow('did not confirm')
 
-    fetch.mockResolvedValueOnce(jsonResponse({ body: { saved: true }, status: 201 }))
-    await expect(uploadCapture({ photoFile })).resolves.toEqual({ saved: true })
+    fetch.mockResolvedValueOnce(jsonResponse({ body: { saved: true, videoSaved: true, videoReady: false }, status: 201 }))
+    await expect(uploadCapture({ photoFile, ...credentials })).resolves.toEqual({ saved: true, videoSaved: true, videoReady: false })
   })
 })

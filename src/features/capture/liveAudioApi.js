@@ -1,9 +1,9 @@
-import { apiConfig, apiUrl } from '../../config/api'
+import { apiUrl, apiConfig } from '../../config/api'
 
-export const maximumAudioBytes = 2 * 1024 * 1024
-export const maximumLiveAudioMs = 60_000
-export const liveAudioChunkMs = 250
-export const maximumWebSocketChunkBytes = 65_536
+export const liveVideoMimeType = 'video/webm;codecs=vp8,opus'
+export const liveVideoTimesliceMs = 500
+export const maximumWebSocketFrameBytes = 256 * 1024
+export const maximumBufferedBytes = 1024 * 1024
 
 function responseMessage(payload, fallback) {
   return payload?.message || payload?.detail || payload?.title || fallback
@@ -20,29 +20,8 @@ export function getLiveAudioSocketUrl() {
 
 export function preferredRecorderOptions() {
   if (typeof MediaRecorder === 'undefined') return null
-
-  const candidates = [
-    'audio/webm;codecs=opus',
-    'audio/webm',
-    'audio/ogg;codecs=opus',
-    'audio/ogg',
-    'audio/mp4',
-    'audio/mpeg',
-  ]
-  const mimeType = candidates.find((candidate) => MediaRecorder.isTypeSupported?.(candidate))
-
-  return mimeType ? { mimeType } : {}
-}
-
-export function audioFilename(mimeType = '') {
-  const normalizedType = mimeType.split(';', 1)[0].trim().toLowerCase()
-  const extensionByType = {
-    'audio/webm': 'webm',
-    'audio/ogg': 'ogg',
-    'audio/mp4': 'm4a',
-    'audio/mpeg': 'mp3',
-  }
-  return `recording.${extensionByType[normalizedType] || 'webm'}`
+  if (!MediaRecorder.isTypeSupported?.(liveVideoMimeType)) return null
+  return { mimeType: liveVideoMimeType }
 }
 
 export async function createLiveAudioSession({ signal } = {}) {
@@ -59,32 +38,21 @@ export async function createLiveAudioSession({ signal } = {}) {
         Accept: 'application/json',
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ consentConfirmed: true }),
+      body: JSON.stringify({ cameraConsentConfirmed: true, microphoneConsentConfirmed: true }),
       cache: 'no-store',
       signal: controller.signal,
     })
     const responseText = await response.text()
     let result = {}
+    try { result = responseText ? JSON.parse(responseText) : {} } catch { result = {} }
 
-    try {
-      result = responseText ? JSON.parse(responseText) : {}
-    } catch {
-      result = {}
-    }
-
-    if (!response.ok) {
-      throw new Error(responseMessage(result, 'The live audio room could not be started.'))
-    }
-
+    if (!response.ok) throw new Error(responseMessage(result, 'The live recording session could not be started.'))
     if (!result.sessionId || !result.publishToken) {
-      throw new Error('The backend did not return a live audio session and publisher token.')
+      throw new Error('The backend did not return a live recording session and publisher token.')
     }
-
     return result
   } catch (error) {
-    if (error.name === 'AbortError' && !signal?.aborted) {
-      throw new Error('Creating the live audio room timed out.')
-    }
+    if (error.name === 'AbortError' && !signal?.aborted) throw new Error('Creating the live recording session timed out.')
     throw error
   } finally {
     window.clearTimeout(timeoutId)
@@ -95,17 +63,27 @@ export async function createLiveAudioSession({ signal } = {}) {
 export async function closeLiveAudioSession({ sessionId, publishToken }) {
   if (!sessionId || !publishToken) return
 
-  const response = await fetch(apiUrl(`/api/v1/live-audio/sessions/${encodeURIComponent(sessionId)}`), {
-    method: 'DELETE',
-    headers: {
-      Accept: 'application/json',
-      'X-Audio-Publish-Token': publishToken,
-    },
-    cache: 'no-store',
-    keepalive: true,
-  })
+  const controller = new AbortController()
+  const timeoutId = window.setTimeout(() => controller.abort(), 15_000)
+  try {
+    const response = await fetch(apiUrl(`/api/v1/live-audio/sessions/${encodeURIComponent(sessionId)}`), {
+      method: 'DELETE',
+      headers: {
+        Accept: 'application/json',
+        'X-Audio-Publish-Token': publishToken,
+      },
+      cache: 'no-store',
+      keepalive: true,
+      signal: controller.signal,
+    })
 
-  if (!response.ok && response.status !== 404) {
-    throw new Error('The live audio room could not be closed cleanly.')
+    if (!response.ok && response.status !== 404) {
+      throw new Error('The live recording session could not be finalized cleanly.')
+    }
+  } catch (error) {
+    if (error.name === 'AbortError') throw new Error('Finalizing the live recording timed out.')
+    throw error
+  } finally {
+    window.clearTimeout(timeoutId)
   }
 }

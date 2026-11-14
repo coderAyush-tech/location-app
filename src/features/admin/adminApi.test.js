@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { fetchAdminCaptureAudio, fetchAdminLiveAudioSessions } from './adminApi'
+import { fetchAdminCaptureAudio, fetchAdminCaptureVideo, fetchAdminLiveAudioSessions } from './adminApi'
 
 describe('admin audio API contract', () => {
   beforeEach(() => {
@@ -29,6 +29,18 @@ describe('admin audio API contract', () => {
 
     const [url, options] = fetch.mock.calls[0]
     expect(url).toBe('https://locationfinder-pdzb.onrender.com/api/v1/admin/captures/capture%2F1/audio')
+    expect(options.headers.Authorization).toBe('Bearer admin-token')
+    expect(options.cache).toBe('no-store')
+  })
+
+  it('loads finalized live video through the protected endpoint without caching', async () => {
+    const recording = new Blob(['private video'], { type: 'video/webm' })
+    fetch.mockResolvedValue({ ok: true, blob: async () => recording })
+
+    await expect(fetchAdminCaptureVideo({ token: 'admin-token', captureId: 'capture/2' })).resolves.toBe(recording)
+
+    const [url, options] = fetch.mock.calls[0]
+    expect(url).toBe('https://locationfinder-pdzb.onrender.com/api/v1/admin/captures/capture%2F2/video')
     expect(options.headers.Authorization).toBe('Bearer admin-token')
     expect(options.cache).toBe('no-store')
   })

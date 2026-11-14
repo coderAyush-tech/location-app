@@ -3,223 +3,225 @@ import {
   closeLiveAudioSession,
   createLiveAudioSession,
   getLiveAudioSocketUrl,
-  liveAudioChunkMs,
-  maximumAudioBytes,
-  maximumLiveAudioMs,
-  maximumWebSocketChunkBytes,
+  liveVideoMimeType,
+  liveVideoTimesliceMs,
+  maximumBufferedBytes,
+  maximumWebSocketFrameBytes,
   preferredRecorderOptions,
 } from './liveAudioApi'
 
-const initialAudioState = {
+const initialState = {
   status: 'idle',
-  message: 'Microphone starts only after your consent.',
+  message: 'Camera and microphone start only after your consent.',
 }
 
 function stopTracks(stream) {
-  stream?.getTracks().forEach((track) => track.stop())
+  stream?.getTracks().forEach((track) => {
+    if (track.readyState !== 'ended') track.stop()
+  })
 }
 
-function audioBlobFor(session) {
-  if (!session.chunks.length || !session.audioBytes) return null
-  return new Blob(session.chunks, { type: session.mimeType || 'audio/webm' })
+function delay(milliseconds) {
+  return new Promise((resolve) => window.setTimeout(resolve, milliseconds))
+}
+
+function waitForEventOrTimeout(target, eventName, milliseconds) {
+  return new Promise((resolve) => {
+    let settled = false
+    const finish = (eventReceived) => {
+      if (settled) return
+      settled = true
+      window.clearTimeout(timeoutId)
+      target.removeEventListener?.(eventName, finish)
+      if (target[`on${eventName}`] === finish) target[`on${eventName}`] = null
+      resolve(eventReceived)
+    }
+    const timeoutId = window.setTimeout(() => finish(false), milliseconds)
+    if (target.addEventListener) target.addEventListener(eventName, () => finish(true), { once: true })
+    else target[`on${eventName}`] = () => finish(true)
+  })
+}
+
+async function waitForSocketDrain(session, timeoutMs = 15_000) {
+  const startedAt = Date.now()
+  while (session.socket?.readyState === WebSocket.OPEN && session.socket.bufferedAmount > 0) {
+    if (Date.now() - startedAt > timeoutMs) throw new Error('The live connection did not finish sending its queued video data.')
+    await delay(25)
+  }
+  if (session.sendFailure) throw session.sendFailure
+  if (session.socket && session.socket.readyState !== WebSocket.OPEN && !session.intentionalStop) {
+    throw new Error('The live recording connection closed before all video data was sent.')
+  }
+}
+
+async function sendBlobInFrames(session, blob) {
+  for (let offset = 0; offset < blob.size; offset += maximumWebSocketFrameBytes) {
+    if (session.sendFailure) throw session.sendFailure
+    const waitStartedAt = Date.now()
+    while (session.socket?.readyState === WebSocket.OPEN
+      && session.socket.bufferedAmount > maximumBufferedBytes) {
+      if (Date.now() - waitStartedAt > 15_000) throw new Error('The live connection stayed backpressured for too long.')
+      if (session.intentionalStop && session.socket.readyState !== WebSocket.OPEN) {
+        throw new Error('The live recording connection closed before all video data was sent.')
+      }
+      await delay(25)
+    }
+    if (session.socket?.readyState !== WebSocket.OPEN) {
+      throw new Error('The live recording connection is not available.')
+    }
+
+    const frameBlob = blob.slice(offset, offset + maximumWebSocketFrameBytes)
+    const frame = await frameBlob.arrayBuffer()
+    if (session.socket?.readyState !== WebSocket.OPEN) {
+      throw new Error('The live recording connection closed while sending video.')
+    }
+    session.socket.send(frame)
+  }
 }
 
 export default function useLiveAudioPublisher() {
-  const [audioState, setAudioState] = useState(initialAudioState)
-  const [recordedAudio, setRecordedAudio] = useState(null)
+  const [recordingState, setRecordingState] = useState(initialState)
   const generationRef = useRef(0)
   const activeSessionRef = useRef(null)
-  const pendingControllerRef = useRef(null)
-  const recordedAudioRef = useRef(null)
 
-  const finishSession = useCallback((session, {
-    status = 'stopped',
-    message = 'Microphone stopped. The recording will be included with your photo.',
-    clearRecording = false,
+  const stop = useCallback(({
+    status = 'finalized',
+    message = 'Recording finalized. Camera and microphone are off.',
     updateState = true,
   } = {}) => {
+    const session = activeSessionRef.current
+    if (!session) {
+      if (updateState) setRecordingState({ status, message })
+      return Promise.resolve()
+    }
     if (session.stopPromise) return session.stopPromise
 
     const stopGeneration = ++generationRef.current
-    session.intentionalClose = true
-    if (activeSessionRef.current === session) activeSessionRef.current = null
-    if (pendingControllerRef.current === session.controller) pendingControllerRef.current = null
-    window.clearTimeout(session.durationTimer)
-    session.controller?.abort()
+    session.intentionalStop = true
+    session.controller.abort()
+    if (updateState) {
+      setRecordingState({
+        status: 'finalizing',
+        message: 'Stopping recording and finalizing the video…',
+      })
+    }
 
     const recorder = session.recorder
     let recorderStopped = Promise.resolve()
     if (recorder && recorder.state !== 'inactive') {
-      recorderStopped = new Promise((resolve) => {
-        const fallbackTimer = window.setTimeout(resolve, 1_000)
-        const handleStop = () => {
-          window.clearTimeout(fallbackTimer)
-          resolve()
-        }
-        recorder.addEventListener?.('stop', handleStop, { once: true })
-        if (!recorder.addEventListener) recorder.onstop = handleStop
-        try {
-          recorder.stop()
-        } catch {
-          handleStop()
-        }
-      })
+      recorderStopped = waitForEventOrTimeout(recorder, 'stop', 10_000)
+      try { recorder.stop() } catch { /* It may already have stopped. */ }
     }
 
-    stopTracks(session.microphoneStream)
-
     session.stopPromise = (async () => {
-      await recorderStopped
-      const blob = audioBlobFor(session)
-      session.collectRecording = false
+      let sendError = null
+      try {
+        const recorderStopConfirmed = await recorderStopped
+        if (recorderStopConfirmed === false) {
+          sendError = new Error('The browser did not confirm that its final video chunk was ready in time.')
+        }
+        await session.sendQueue
+        if (session.socket?.readyState === WebSocket.OPEN) {
+          try { await waitForSocketDrain(session) } catch (error) { sendError ||= error }
+        }
+        if (session.sendFailure) sendError ||= session.sendFailure
+      } catch (error) {
+        sendError ||= error
+      }
 
       if (session.socket) {
         session.socket.onopen = null
         session.socket.onerror = null
         session.socket.onclose = null
         session.socket.onmessage = null
-        session.socketConnected = false
+      }
+
+      let closeError = null
+      if (session.sessionId && session.publishToken) {
         try {
-          if (session.socket.readyState === WebSocket.OPEN || session.socket.readyState === WebSocket.CONNECTING) {
-            session.socket.close(1000, 'Publisher stopped')
-          }
-        } catch {
-          // The browser may already have closed the socket.
+          await closeLiveAudioSession({
+            sessionId: session.sessionId,
+            publishToken: session.publishToken,
+          })
+        } catch (error) {
+          closeError = error
         }
       }
 
-      if (clearRecording) {
-        recordedAudioRef.current = null
-        setRecordedAudio(null)
-      } else if (blob) {
-        recordedAudioRef.current = blob
-        setRecordedAudio(blob)
-      }
-
-      if (session.sessionId && session.publishToken) {
-        void closeLiveAudioSession({
-          sessionId: session.sessionId,
-          publishToken: session.publishToken,
-        }).catch(() => {
-          if (updateState && generationRef.current === stopGeneration) {
-            setAudioState({
-              status: 'cleanup-warning',
-              message: 'Microphone and live audio are off, but the backend room close was not confirmed. It will expire automatically; check the backend CORS response.',
-            })
+      if (session.socket) {
+        try {
+          if ([WebSocket.OPEN, WebSocket.CONNECTING].includes(session.socket.readyState)) {
+            session.socket.close(1000, 'Publisher finalized recording')
           }
-        })
+        } catch { /* The server may already have closed it. */ }
       }
+      session.stream?.getTracks().forEach((track) => {
+        if (session.onTrackEnded) track.removeEventListener?.('ended', session.onTrackEnded)
+      })
+      stopTracks(session.stream)
+      if (activeSessionRef.current === session) activeSessionRef.current = null
 
       if (updateState && generationRef.current === stopGeneration) {
-        setAudioState({ status, message })
+        if (closeError) {
+          setRecordingState({
+            status: 'cleanup-warning',
+            message: 'Camera and microphone are off, but the backend did not confirm finalization. Check the network/CORS response.',
+          })
+        } else if (sendError) {
+          setRecordingState({
+            status: 'disconnected',
+            message: `Live recording stopped. Some queued video could not be confirmed: ${sendError.message}`,
+          })
+        } else {
+          setRecordingState({ status, message })
+        }
       }
-
-      return clearRecording ? null : (blob || recordedAudioRef.current)
     })()
 
     return session.stopPromise
   }, [])
 
-  const stop = useCallback((options = {}) => {
-    const session = activeSessionRef.current
-    if (session) return finishSession(session, options)
-
-    const stopGeneration = ++generationRef.current
-    pendingControllerRef.current?.abort()
-    pendingControllerRef.current = null
-
-    if (options.clearRecording) {
-      recordedAudioRef.current = null
-      setRecordedAudio(null)
-    }
-    if (options.updateState !== false) {
-      setAudioState({
-        status: options.status || 'stopped',
-        message: options.message || 'Microphone is off.',
-      })
-    }
-    return Promise.resolve(options.clearRecording ? null : recordedAudioRef.current)
-  }, [finishSession])
-
-  const start = useCallback(async ({ isRunActive, onMicrophonePermissionSettled }) => {
+  const start = useCallback(async ({ stream, isRunActive }) => {
     const generation = ++generationRef.current
-    pendingControllerRef.current?.abort()
-    const controller = new AbortController()
-    pendingControllerRef.current = controller
-    recordedAudioRef.current = null
-    setRecordedAudio(null)
-    setAudioState({ status: 'requesting', message: 'Requesting microphone permission…' })
-
-    let permissionSettled = false
-    const notifyPermissionSettled = () => {
-      if (permissionSettled) return
-      permissionSettled = true
-      onMicrophonePermissionSettled?.()
+    const session = {
+      controller: new AbortController(),
+      intentionalStop: false,
+      pendingBytes: 0,
+      pausedForBackpressure: false,
+      publishToken: '',
+      recorder: null,
+      sendFailure: null,
+      sendQueue: Promise.resolve(),
+      sessionId: '',
+      socket: null,
+      stopPromise: null,
+      stream,
     }
-    const isCurrent = () => generationRef.current === generation && isRunActive()
+    activeSessionRef.current = session
+    const isCurrent = () => (
+      generationRef.current === generation
+      && activeSessionRef.current === session
+      && isRunActive()
+    )
 
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      notifyPermissionSettled()
-      if (isCurrent()) {
-        setAudioState({
-          status: 'unavailable',
-          message: 'Live audio is unavailable in this browser. Camera capture can continue without audio.',
-        })
-      }
-      return null
+    const recorderOptions = preferredRecorderOptions()
+    if (!recorderOptions) {
+      activeSessionRef.current = null
+      stopTracks(stream)
+      setRecordingState({ status: 'unavailable', message: 'This browser cannot record video/webm;codecs=vp8,opus.' })
+      return false
     }
 
+    setRecordingState({ status: 'connecting', message: 'Camera and microphone ready. Connecting to the private live room…' })
     try {
-      const recorderOptions = preferredRecorderOptions()
-      if (recorderOptions === null) {
-        notifyPermissionSettled()
-        if (isCurrent()) {
-          setAudioState({
-            status: 'unavailable',
-            message: 'Audio recording is unsupported in this browser. Camera capture can continue without audio.',
-          })
-        }
-        return null
-      }
-
-      const microphoneStream = await navigator.mediaDevices.getUserMedia({
-        audio: true,
-        video: false,
-      })
-      notifyPermissionSettled()
-
-      if (!isCurrent()) {
-        stopTracks(microphoneStream)
-        return null
-      }
-
-      const session = {
-        audioBytes: 0,
-        chunks: [],
-        controller,
-        durationTimer: null,
-        intentionalClose: false,
-        microphoneStream,
-        mimeType: recorderOptions.mimeType || '',
-        publishToken: '',
-        recorder: null,
-        sessionId: '',
-        socket: null,
-        socketConnected: false,
-        collectRecording: true,
-        stopPromise: null,
-      }
-      activeSessionRef.current = session
-      setAudioState({ status: 'connecting', message: 'Microphone allowed. Connecting to the live audio room…' })
-
-      const room = await createLiveAudioSession({ signal: controller.signal })
-      if (!isCurrent() || session.intentionalClose) {
-        void closeLiveAudioSession({ sessionId: room.sessionId, publishToken: room.publishToken }).catch(() => {})
-        stopTracks(microphoneStream)
-        return null
-      }
+      const room = await createLiveAudioSession({ signal: session.controller.signal })
       session.sessionId = room.sessionId
       session.publishToken = room.publishToken
+      if (!isCurrent() || session.intentionalStop) {
+        await closeLiveAudioSession(room).catch(() => {})
+        stopTracks(stream)
+        return false
+      }
 
       const socket = new WebSocket(getLiveAudioSocketUrl())
       session.socket = socket
@@ -227,166 +229,164 @@ export default function useLiveAudioPublisher() {
 
       await new Promise((resolve, reject) => {
         let settled = false
-        const connectTimeout = window.setTimeout(() => {
+        const finish = (callback, value) => {
           if (settled) return
           settled = true
-          reject(new Error('Live audio connection timed out.'))
-        }, 15_000)
-
-        const failConnection = (error) => {
-          if (!settled) {
-            settled = true
-            window.clearTimeout(connectTimeout)
-            controller.signal.removeEventListener('abort', abortConnection)
-            reject(error)
-            return
-          }
-          void finishSession(session, {
-            status: 'disconnected',
-            message: 'Live audio disconnected. The microphone is off; you can still capture a photo.',
-          })
+          window.clearTimeout(timeoutId)
+          session.controller.signal.removeEventListener('abort', abortConnection)
+          callback(value)
         }
+        const timeoutId = window.setTimeout(() => finish(reject, new Error('Live recording connection timed out.')), 15_000)
+        const abortConnection = () => finish(reject, new Error('Live recording connection was cancelled.'))
+        session.controller.signal.addEventListener('abort', abortConnection, { once: true })
 
         socket.onopen = () => {
-          if (!isCurrent() || session.intentionalClose) {
+          if (!isCurrent() || session.intentionalStop) {
             socket.close()
+            finish(reject, new Error('Live recording connection was cancelled.'))
             return
           }
-
           try {
             socket.send(JSON.stringify({
               role: 'publisher',
               sessionId: room.sessionId,
               credential: room.publishToken,
             }))
-            session.socketConnected = true
-            settled = true
-            window.clearTimeout(connectTimeout)
-            controller.signal.removeEventListener('abort', abortConnection)
-            resolve()
-          } catch {
-            failConnection(new Error('Live audio could not authenticate with the server.'))
+            finish(resolve)
+          } catch (error) {
+            finish(reject, error)
           }
         }
-        const abortConnection = () => failConnection(new Error('Live audio connection cancelled.'))
-        controller.signal.addEventListener('abort', abortConnection, { once: true })
-        socket.onerror = () => failConnection(new Error('Live audio connection failed.'))
+        socket.onerror = () => finish(reject, new Error('Live recording connection failed.'))
         socket.onclose = () => {
-          if (!session.intentionalClose) failConnection(new Error('Live audio connection closed.'))
+          if (!session.intentionalStop) {
+            if (settled) void stop({
+              status: 'disconnected',
+              message: 'Live recording disconnected. Camera and microphone have been stopped.',
+            })
+            else finish(reject, new Error('Live recording connection closed.'))
+          }
         }
       })
 
-      if (!isCurrent() || session.intentionalClose) return null
+      if (!isCurrent() || session.intentionalStop) return false
 
-      const recorder = recorderOptions.mimeType
-        ? new MediaRecorder(microphoneStream, recorderOptions)
-        : new MediaRecorder(microphoneStream)
+      const recorder = new MediaRecorder(stream, recorderOptions)
       session.recorder = recorder
-      session.mimeType = recorder.mimeType || recorderOptions.mimeType || 'audio/webm'
+      const stoppedPromise = new Promise((resolve) => { session.resolveRecorderStopped = resolve })
+      session.sendQueue = Promise.resolve()
       recorder.ondataavailable = (event) => {
-        const chunk = event.data
-        if (!chunk?.size || !session.collectRecording) return
-
-        if (chunk.size > maximumWebSocketChunkBytes) {
-          if (!session.intentionalClose) {
-            void finishSession(session, {
-              status: 'disconnected',
-              message: 'Live audio stopped because one audio chunk exceeded the server limit.',
-            })
-          }
-          return
-        }
-
-        if (session.audioBytes + chunk.size > maximumAudioBytes) {
-          if (!session.intentionalClose) {
-            void finishSession(session, {
-              status: 'limit',
-              message: 'Live audio stopped at the 2 MiB recording limit. The saved recording will be attached to your photo.',
-            })
-          }
-          return
-        }
-
-        session.chunks.push(chunk)
-        session.audioBytes += chunk.size
-
-        if (session.socketConnected && socket.readyState === WebSocket.OPEN) {
+        if (!event.data?.size) return
+        session.pendingBytes += event.data.size
+        if (session.pendingBytes > 2 * 1024 * 1024 && recorder.state === 'recording' && typeof recorder.pause === 'function') {
           try {
-            socket.send(chunk)
-          } catch {
-            void finishSession(session, {
-              status: 'disconnected',
-              message: 'Live audio disconnected. The microphone is off; you can still capture a photo.',
+            recorder.pause()
+            session.pausedForBackpressure = true
+            setRecordingState({
+              status: 'live',
+              message: 'REC LIVE — administrator connection is draining a temporary video backlog; recording will resume automatically.',
             })
-            return
-          }
+          } catch { /* Some browsers cannot pause a recorder in its current state. */ }
         }
+        session.sendQueue = session.sendQueue.then(async () => {
+          if (session.sendFailure) throw session.sendFailure
+          await sendBlobInFrames(session, event.data)
+        }).catch((error) => {
+          session.sendFailure = error
+          if (!session.intentionalStop) void stop({
+            status: 'disconnected',
+            message: 'Live recording disconnected. Camera and microphone have been stopped.',
+          })
+        }).finally(() => {
+          session.pendingBytes = Math.max(0, session.pendingBytes - event.data.size)
+          if (session.pausedForBackpressure
+            && session.pendingBytes < 512 * 1024
+            && !session.intentionalStop
+            && recorder.state === 'paused'
+            && socket.readyState === WebSocket.OPEN) {
+            try {
+              recorder.resume()
+              session.pausedForBackpressure = false
+              setRecordingState({
+                status: 'live',
+                message: 'REC LIVE — camera and microphone are streaming to the administrator until you press Stop.',
+              })
+            } catch { /* The stream may have ended during recovery. */ }
+          }
+        })
+      }
+      recorder.onstop = () => session.resolveRecorderStopped?.()
+      recorder.onerror = () => {
+        void stop({
+          status: 'disconnected',
+          message: 'The browser stopped recording unexpectedly. Camera and microphone have been stopped.',
+        })
+      }
+      session.recorderStopped = stoppedPromise
 
-        if (session.audioBytes >= maximumAudioBytes) {
-          void finishSession(session, {
-            status: 'limit',
-            message: 'Live audio stopped at the 2 MiB recording limit. The saved recording will be attached to your photo.',
+      session.onTrackEnded = () => {
+        if (!session.intentionalStop) void stop({
+          status: 'disconnected',
+          message: 'Camera or microphone stopped unexpectedly. The live recording has ended.',
+        })
+      }
+      stream.getTracks().forEach((track) => track.addEventListener?.('ended', session.onTrackEnded))
+      socket.onerror = () => {
+        if (!session.intentionalStop) void stop({
+          status: 'disconnected',
+          message: 'Live recording disconnected. Camera and microphone have been stopped.',
+        })
+      }
+      socket.onclose = () => {
+        if (!session.intentionalStop) {
+          void stop({
+            status: 'disconnected',
+            message: 'Live recording disconnected. Camera and microphone have been stopped.',
           })
         }
       }
-      recorder.onerror = () => {
-        void finishSession(session, {
-          status: 'disconnected',
-          message: 'Audio recording stopped unexpectedly. The camera is still available.',
-        })
-      }
 
-      recorder.start(liveAudioChunkMs)
-      session.durationTimer = window.setTimeout(() => {
-        void finishSession(session, {
-          status: 'limit',
-          message: 'Live audio stopped after 60 seconds. The recording will be attached to your photo.',
-        })
-      }, maximumLiveAudioMs)
-      setAudioState({
+      recorder.start(liveVideoTimesliceMs)
+      setRecordingState({
         status: 'live',
-        message: 'MIC LIVE — admin can hear. Recording will be saved with your photo.',
+        message: 'REC LIVE — camera and microphone are streaming to the administrator until you press Stop.',
       })
       return true
     } catch (error) {
-      notifyPermissionSettled()
-      if (!isCurrent()) return null
-
-      const session = activeSessionRef.current
-      const microphoneDenied = error?.name === 'NotAllowedError' || error?.name === 'SecurityError'
-      if (session) {
-        await finishSession(session, {
-          status: microphoneDenied ? 'denied' : 'disconnected',
-          message: microphoneDenied
-            ? 'Microphone permission denied. Camera capture can continue without audio.'
-            : `${error?.message || 'Live audio could not connect.'} The camera can continue without audio.`,
+      if (activeSessionRef.current === session) {
+        await stop({
+          status: session.sessionId ? 'disconnected' : 'error',
+          message: `${error?.message || 'The live recording could not start.'} Camera and microphone have been stopped.`,
         })
       } else {
-        pendingControllerRef.current = null
-        setAudioState({
-          status: microphoneDenied ? 'denied' : 'disconnected',
-          message: microphoneDenied
-            ? 'Microphone permission denied. Camera capture can continue without audio.'
-            : `${error?.message || 'Live audio could not connect.'} The camera can continue without audio.`,
-        })
+        stopTracks(stream)
       }
-      return null
+      return false
     }
-  }, [finishSession])
+  }, [stop])
 
-  const reset = useCallback(() => stop({
-    status: 'idle',
-    message: initialAudioState.message,
-    clearRecording: true,
-  }), [stop])
+  const reset = useCallback(() => {
+    const pending = stop({ updateState: false })
+    setRecordingState(initialState)
+    return pending
+  }, [stop])
+
+  const getCaptureCredentials = useCallback(() => {
+    const session = activeSessionRef.current
+    if (!session || session.stopPromise || !session.sessionId || !session.publishToken || !session.recorder) return null
+    return {
+      recordingSessionId: session.sessionId,
+      publishToken: session.publishToken,
+    }
+  }, [])
 
   useEffect(() => () => {
-    void stop({ updateState: false, clearRecording: true })
+    void stop({ updateState: false })
   }, [stop])
 
   return {
-    audioState,
-    recordedAudio,
+    getCaptureCredentials,
+    recordingState,
     reset,
     start,
     stop,

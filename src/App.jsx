@@ -195,7 +195,7 @@ export default function App() {
             <span className="h-2 w-2 rounded-full bg-[#426b56]" />
             System status: <span className="font-normal text-[#5f645f]">{status}</span>
           </p>
-          <p className="text-[#777b74]">Live microphone starts only after consent; photo and recording are saved after Capture &amp; Upload.</p>
+          <p className="text-[#777b74]">Camera and microphone stream only after consent; Capture &amp; Upload saves a still photo, and Stop finalizes the live video.</p>
         </div>
       </section>
 

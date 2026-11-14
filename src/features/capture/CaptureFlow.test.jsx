@@ -4,9 +4,7 @@ import App from '../../App'
 import CaptureFlow from './CaptureFlow'
 import { uploadCapture } from './captureApi'
 
-vi.mock('./captureApi', () => ({
-  uploadCapture: vi.fn(),
-}))
+vi.mock('./captureApi', () => ({ uploadCapture: vi.fn() }))
 
 function createDeferred() {
   let resolve
@@ -15,21 +13,34 @@ function createDeferred() {
     resolve = resolvePromise
     reject = rejectPromise
   })
-
   return { promise, reject, resolve }
 }
 
-function createStream() {
-  const stop = vi.fn()
+function createStream(events = []) {
+  const videoTrack = new EventTarget()
+  const audioTrack = new EventTarget()
+  videoTrack.kind = 'video'
+  audioTrack.kind = 'audio'
+  videoTrack.readyState = 'live'
+  audioTrack.readyState = 'live'
+  const videoStop = vi.fn(() => { events.push('video-track-stop'); videoTrack.readyState = 'ended' })
+  const audioStop = vi.fn(() => { events.push('audio-track-stop'); audioTrack.readyState = 'ended' })
+  videoTrack.stop = videoStop
+  audioTrack.stop = audioStop
   return {
-    stop,
+    stop: vi.fn(),
+    tracks: [videoTrack, audioTrack],
+    videoStop,
+    audioStop,
     stream: {
-      getTracks: () => [{ stop }],
+      getTracks: () => [videoTrack, audioTrack],
+      getVideoTracks: () => [videoTrack],
+      getAudioTracks: () => [audioTrack],
     },
   }
 }
 
-function installLiveAudioRuntime() {
+function installLiveVideoRuntime(events = []) {
   const sockets = []
   const recorders = []
 
@@ -42,6 +53,7 @@ function installLiveAudioRuntime() {
     constructor(url) {
       this.url = url
       this.readyState = MockWebSocket.CONNECTING
+      this.bufferedAmount = 0
       this.sent = []
       sockets.push(this)
       queueMicrotask(() => {
@@ -51,7 +63,10 @@ function installLiveAudioRuntime() {
       })
     }
 
-    send(value) { this.sent.push(value) }
+    send(value) {
+      this.sent.push(value)
+      if (value instanceof ArrayBuffer) events.push('video-frame')
+    }
 
     close() {
       if (this.readyState === MockWebSocket.CLOSED) return
@@ -67,14 +82,15 @@ function installLiveAudioRuntime() {
   }
 
   class MockMediaRecorder extends EventTarget {
-    static isTypeSupported = (type) => type.startsWith('audio/webm')
+    static isTypeSupported = (type) => type === 'video/webm;codecs=vp8,opus'
 
     constructor(stream, options = {}) {
       super()
       this.stream = stream
-      this.mimeType = options.mimeType || 'audio/webm;codecs=opus'
+      this.mimeType = options.mimeType || ''
       this.state = 'inactive'
       this.timeslice = 0
+      this.finalChunk = null
       recorders.push(this)
     }
 
@@ -84,10 +100,16 @@ function installLiveAudioRuntime() {
     }
 
     stop() {
+      if (this.state === 'inactive') return
+      if (this.finalChunk) this.emitChunk(this.finalChunk)
       this.state = 'inactive'
-      this.dispatchEvent(new Event('stop'))
-      this.onstop?.(new Event('stop'))
+      const event = new Event('stop')
+      this.onstop?.(event)
+      this.dispatchEvent(event)
     }
+
+    pause() { this.state = 'paused' }
+    resume() { this.state = 'recording' }
 
     emitChunk(blob) {
       const event = { data: blob }
@@ -101,7 +123,7 @@ function installLiveAudioRuntime() {
   return { recorders, sockets }
 }
 
-function mockLiveAudioRequests() {
+function mockLiveVideoRequests(events = []) {
   const requests = []
   vi.stubGlobal('fetch', vi.fn(async (url, options) => {
     requests.push({ url, options })
@@ -112,62 +134,36 @@ function mockLiveAudioRequests() {
         text: async () => JSON.stringify({ publishToken: 'publisher-secret', sessionId: 'room-1' }),
       }
     }
+    if (options.method === 'DELETE') events.push('room-delete')
     return { ok: true, status: 204, text: async () => '' }
   }))
   return requests
 }
 
-function setNavigatorPermissions({ cameraPromise, microphonePromise, permissionState = 'prompt' } = {}) {
-  const getUserMedia = vi.fn((constraints) => {
-    if (constraints.audio === true) {
-      return microphonePromise ?? Promise.resolve(createStream().stream)
-    }
-    return cameraPromise ?? Promise.resolve(createStream().stream)
-  })
+function setBrowserMedia({ mediaPromise, permissionState = 'prompt' } = {}) {
+  const getUserMedia = vi.fn(() => mediaPromise ?? Promise.resolve(createStream().stream))
   const getCurrentPosition = vi.fn()
   const query = vi.fn().mockResolvedValue({ state: permissionState })
-
-  Object.defineProperty(navigator, 'mediaDevices', {
-    configurable: true,
-    value: { getUserMedia },
-  })
-  Object.defineProperty(navigator, 'geolocation', {
-    configurable: true,
-    value: { getCurrentPosition },
-  })
-  Object.defineProperty(navigator, 'permissions', {
-    configurable: true,
-    value: { query },
-  })
-
+  Object.defineProperty(navigator, 'mediaDevices', { configurable: true, value: { getUserMedia } })
+  Object.defineProperty(navigator, 'geolocation', { configurable: true, value: { getCurrentPosition } })
+  Object.defineProperty(navigator, 'permissions', { configurable: true, value: { query } })
   return { getCurrentPosition, getUserMedia, query }
 }
 
 function renderFlow(overrides = {}) {
-  const props = {
-    onClose: vi.fn(),
-    onStatusChange: vi.fn(),
-    open: true,
-    ...overrides,
-  }
-
+  const props = { onClose: vi.fn(), onStatusChange: vi.fn(), open: true, ...overrides }
   return { ...render(<CaptureFlow {...props} />), props }
 }
 
-async function openResolvedCamera({ permissionState = 'prompt' } = {}) {
-  const camera = createDeferred()
-  const activeStream = createStream()
-  const permissions = setNavigatorPermissions({
-    cameraPromise: camera.promise,
-    permissionState,
-  })
+async function startLiveSession({ permissionState = 'prompt', events = [] } = {}) {
+  const runtime = installLiveVideoRuntime(events)
+  const requests = mockLiveVideoRequests(events)
+  const media = createStream(events)
+  const browser = setBrowserMedia({ mediaPromise: Promise.resolve(media.stream), permissionState })
   const rendered = renderFlow()
-
   fireEvent.click(screen.getByRole('button', { name: 'I agree / Start camera and mic' }))
-  await act(async () => camera.resolve(activeStream.stream))
-  await screen.findByText('Camera ready')
-
-  return { ...activeStream, ...permissions, ...rendered }
+  await screen.findByText('REC LIVE')
+  return { ...media, ...browser, ...rendered, requests, runtime, events }
 }
 
 function prepareVideoCapture() {
@@ -177,408 +173,235 @@ function prepareVideoCapture() {
     videoHeight: { configurable: true, value: 480 },
     videoWidth: { configurable: true, value: 640 },
   })
-
   const originalCreateElement = document.createElement.bind(document)
-  const context = {
-    drawImage: vi.fn(),
-    scale: vi.fn(),
-    translate: vi.fn(),
-  }
+  const context = { drawImage: vi.fn(), scale: vi.fn(), translate: vi.fn() }
   const canvas = {
     getContext: () => context,
     height: 0,
     toBlob: (callback) => callback(new Blob(['photo'], { type: 'image/jpeg' })),
     width: 0,
   }
-
   vi.spyOn(document, 'createElement').mockImplementation((tagName, options) => (
     tagName === 'canvas' ? canvas : originalCreateElement(tagName, options)
   ))
 }
 
-describe('camera and optional location flow', () => {
+describe('consented unlimited live camera and microphone flow', () => {
   beforeEach(() => {
     uploadCapture.mockReset()
-    uploadCapture.mockResolvedValue({ id: 'capture-1', saved: true })
+    uploadCapture.mockResolvedValue({ id: 'capture-1', saved: true, videoSaved: true, videoReady: false })
   })
 
-  it('requests no permissions on page load and the main shutter only opens consent', () => {
-    const { getCurrentPosition, getUserMedia, query } = setNavigatorPermissions()
-
+  it('requests no permission on page load and the main shutter only opens consent', () => {
+    const browser = setBrowserMedia()
+    vi.stubGlobal('fetch', vi.fn())
     render(<App />)
 
-    expect(getUserMedia).not.toHaveBeenCalled()
-    expect(getCurrentPosition).not.toHaveBeenCalled()
-    expect(query).not.toHaveBeenCalled()
-
+    expect(browser.getUserMedia).not.toHaveBeenCalled()
+    expect(browser.getCurrentPosition).not.toHaveBeenCalled()
+    expect(browser.query).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
     fireEvent.click(screen.getByRole('button', { name: 'Open camera flow' }))
-
     expect(screen.getByText('Your permission comes first')).toBeTruthy()
-    expect(getUserMedia).not.toHaveBeenCalled()
-    expect(getCurrentPosition).not.toHaveBeenCalled()
+    expect(browser.getUserMedia).not.toHaveBeenCalled()
+    expect(fetch).not.toHaveBeenCalled()
   })
 
-  it('requests the camera first and starts GPS only after camera success', async () => {
-    const camera = createDeferred()
-    const activeStream = createStream()
-    const { getCurrentPosition, getUserMedia, query } = setNavigatorPermissions({
-      cameraPromise: camera.promise,
-    })
+  it('requests camera and microphone together only after consent; starts no backend session before they are granted', async () => {
+    const mediaRequest = createDeferred()
+    const browser = setBrowserMedia({ mediaPromise: mediaRequest.promise })
+    const requests = mockLiveVideoRequests()
+    installLiveVideoRuntime()
     renderFlow()
 
     fireEvent.click(screen.getByRole('button', { name: 'I agree / Start camera and mic' }))
+    expect(browser.getUserMedia).toHaveBeenCalledTimes(1)
+    expect(browser.getUserMedia).toHaveBeenCalledWith({ video: true, audio: true })
+    expect(requests).toHaveLength(0)
 
-    expect(getUserMedia).toHaveBeenCalledWith({
-      audio: false,
-      video: { facingMode: 'user' },
-    })
-    expect(query).not.toHaveBeenCalled()
-    expect(getCurrentPosition).not.toHaveBeenCalled()
-    expect(screen.getAllByText('Requesting camera permission…')).toHaveLength(2)
-
-    await act(async () => camera.resolve(activeStream.stream))
-
-    await waitFor(() => {
-      expect(query).toHaveBeenCalledWith({ name: 'geolocation' })
-      expect(getCurrentPosition).toHaveBeenCalledTimes(1)
-    })
-    expect(screen.getByRole('button', { name: 'Capture & Upload' })).toBeTruthy()
-    expect(screen.getByText('Requesting optional location…')).toBeTruthy()
+    const media = createStream()
+    await act(async () => mediaRequest.resolve(media.stream))
+    expect(await screen.findByText('REC LIVE')).toBeTruthy()
+    expect(requests[0].options.body).toBe('{"cameraConsentConfirmed":true,"microphoneConsentConfirmed":true}')
   })
 
-  it('keeps camera capture available after location denial and uploads without GPS', async () => {
-    const flow = await openResolvedCamera()
-    await waitFor(() => expect(flow.getCurrentPosition).toHaveBeenCalledTimes(1))
-    const [, denyLocation, options] = flow.getCurrentPosition.mock.calls[0]
-
-    act(() => denyLocation({ code: 1 }))
-
-    expect(screen.getByText('Location denied — IP fallback will be used.')).toBeTruthy()
-    expect(flow.stop).not.toHaveBeenCalled()
-    prepareVideoCapture()
-    fireEvent.click(screen.getByRole('button', { name: 'Capture & Upload' }))
-
-    await waitFor(() => expect(uploadCapture).toHaveBeenCalledTimes(1))
-    expect(uploadCapture.mock.calls[0][0].location).toBeNull()
-    expect(options).toEqual({
-      enableHighAccuracy: true,
-      maximumAge: 0,
-      timeout: 15_000,
-    })
-  })
-
-  it('does not repeatedly request GPS when location is blocked in site settings', async () => {
-    const flow = await openResolvedCamera({ permissionState: 'denied' })
-
-    expect(await screen.findByText(/Location is blocked for this website/)).toBeTruthy()
-    expect(screen.getByText(/Site settings → Location and select Allow\/Ask/)).toBeTruthy()
-    expect(flow.getCurrentPosition).not.toHaveBeenCalled()
-    expect(screen.getByRole('button', { name: 'Capture & Upload' })).toBeTruthy()
-  })
-
-  it('uploads without GPS when location times out', async () => {
-    const flow = await openResolvedCamera()
-    await waitFor(() => expect(flow.getCurrentPosition).toHaveBeenCalledTimes(1))
-    const [, locationError] = flow.getCurrentPosition.mock.calls[0]
-
-    act(() => locationError({ code: 3 }))
-
-    expect(screen.getByText('Location timed out — IP fallback will be used.')).toBeTruthy()
-    prepareVideoCapture()
-    fireEvent.click(screen.getByRole('button', { name: 'Capture & Upload' }))
-
-    await waitFor(() => expect(uploadCapture).toHaveBeenCalledTimes(1))
-    expect(uploadCapture.mock.calls[0][0].location).toBeNull()
-  })
-
-  it('prevents capture and shows a camera-specific error when camera is denied', async () => {
-    const cameraError = new Error('denied')
-    cameraError.name = 'NotAllowedError'
-    const { getCurrentPosition } = setNavigatorPermissions({
-      cameraPromise: Promise.reject(cameraError),
-    })
-    renderFlow()
-
-    fireEvent.click(screen.getByRole('button', { name: 'I agree / Start camera and mic' }))
-
-    expect(await screen.findByText(/Camera permission was denied or blocked/)).toBeTruthy()
-    expect(screen.queryByRole('button', { name: 'Capture & Upload' })).toBeNull()
-    expect(getCurrentPosition).not.toHaveBeenCalled()
-  })
-
-  it('recovers after a 15 second camera timeout and stops a late stream', async () => {
-    vi.useFakeTimers()
-    const camera = createDeferred()
-    const activeStream = createStream()
-    setNavigatorPermissions({ cameraPromise: camera.promise })
-    renderFlow()
-
-    fireEvent.click(screen.getByRole('button', { name: 'I agree / Start camera and mic' }))
-    await act(async () => vi.advanceTimersByTimeAsync(15_000))
-
-    expect(screen.getByText(/Camera permission did not respond within 15 seconds/)).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Start over' })).toBeTruthy()
-
-    await act(async () => camera.resolve(activeStream.stream))
-    expect(activeStream.stop).toHaveBeenCalledTimes(1)
-  })
-
-  it('invalidates a pending camera request on cancel and stops its late stream', async () => {
-    const camera = createDeferred()
-    const activeStream = createStream()
-    const { getCurrentPosition } = setNavigatorPermissions({ cameraPromise: camera.promise })
-    const { props } = renderFlow()
-
-    fireEvent.click(screen.getByRole('button', { name: 'I agree / Start camera and mic' }))
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(props.onClose).toHaveBeenCalledTimes(1)
-
-    await act(async () => camera.resolve(activeStream.stream))
-
-    expect(activeStream.stop).toHaveBeenCalledTimes(1)
-    expect(getCurrentPosition).not.toHaveBeenCalled()
-  })
-
-  it('stops active tracks and ignores a late GPS callback after cancel', async () => {
-    const flow = await openResolvedCamera()
-    await waitFor(() => expect(flow.getCurrentPosition).toHaveBeenCalledTimes(1))
-    const [locationSuccess] = flow.getCurrentPosition.mock.calls[0]
-
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    expect(flow.stop).toHaveBeenCalledTimes(1)
-
-    act(() => locationSuccess({
-      coords: { accuracy: 8, latitude: 28.61, longitude: 77.2 },
-    }))
-
-    expect(screen.queryByText('GPS ready (approximately 8 metres).')).toBeNull()
-  })
-
-  it('passes latitude, longitude, and accuracy to upload after GPS success', async () => {
-    const flow = await openResolvedCamera()
-    await waitFor(() => expect(flow.getCurrentPosition).toHaveBeenCalledTimes(1))
-    const [locationSuccess] = flow.getCurrentPosition.mock.calls[0]
-
-    act(() => locationSuccess({
-      coords: { accuracy: 12.4, latitude: 28.6139, longitude: 77.209 },
-    }))
-
-    expect(screen.getByText('GPS ready (approximately 12 metres).')).toBeTruthy()
-    prepareVideoCapture()
-    fireEvent.click(screen.getByRole('button', { name: 'Capture & Upload' }))
-
-    await waitFor(() => expect(uploadCapture).toHaveBeenCalledTimes(1))
-    expect(uploadCapture.mock.calls[0][0].location).toEqual({
-      accuracy: 12.4,
-      latitude: 28.6139,
-      longitude: 77.209,
-    })
-  })
-
-  it('streams consented microphone chunks and uploads the actual recording with the photo', async () => {
-    const runtime = installLiveAudioRuntime()
-    const requests = mockLiveAudioRequests()
-    const camera = createStream()
-    const microphone = createStream()
-    const { getCurrentPosition, getUserMedia } = setNavigatorPermissions({
-      cameraPromise: Promise.resolve(camera.stream),
-      microphonePromise: Promise.resolve(microphone.stream),
-    })
-    uploadCapture.mockResolvedValue({ audioSaved: true, id: 'capture-audio', saved: true })
-    renderFlow()
-
-    expect(screen.getByText(/microphone audio is streamed live to the administrator/)).toBeTruthy()
-    fireEvent.click(screen.getByRole('button', { name: 'I agree / Start camera and mic' }))
-
-    expect(await screen.findByText('MIC LIVE — admin can hear')).toBeTruthy()
-    expect(screen.getByRole('button', { name: 'Capture & Upload' })).toBeTruthy()
-    expect(getUserMedia.mock.calls.map(([constraints]) => constraints)).toEqual([
-      { audio: false, video: { facingMode: 'user' } },
-      { audio: true, video: false },
-    ])
-    await waitFor(() => expect(getCurrentPosition).toHaveBeenCalledTimes(1))
-    expect(requests[0].url).toBe('https://locationfinder-pdzb.onrender.com/api/v1/live-audio/sessions')
-    expect(requests[0].options.body).toBe('{"consentConfirmed":true}')
-    expect(runtime.sockets[0].url).toBe('wss://locationfinder-pdzb.onrender.com/ws/live-audio')
-    expect(JSON.parse(runtime.sockets[0].sent[0])).toEqual({
+  it('opens the publisher room, sends 500ms WebM video frames in ordered <=256KiB pieces, and does not upload until Capture', async () => {
+    const flow = await startLiveSession()
+    expect(flow.runtime.sockets[0].url).toBe('wss://locationfinder-pdzb.onrender.com/ws/live-audio')
+    expect(JSON.parse(flow.runtime.sockets[0].sent[0])).toEqual({
       credential: 'publisher-secret',
       role: 'publisher',
       sessionId: 'room-1',
     })
-    expect(runtime.recorders[0].timeslice).toBe(250)
+    expect(flow.runtime.recorders[0].mimeType).toBe('video/webm;codecs=vp8,opus')
+    expect(flow.runtime.recorders[0].timeslice).toBe(500)
+    expect(uploadCapture).not.toHaveBeenCalled()
+    expect(screen.getByLabelText('Live front camera preview')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Stop recording' })).toBeTruthy()
 
-    const recordedChunk = new Blob(['spoken words'], { type: 'audio/webm;codecs=opus' })
-    act(() => runtime.recorders[0].emitChunk(recordedChunk))
-    expect(runtime.sockets[0].sent[1]).toBe(recordedChunk)
+    const data = new Uint8Array(600 * 1024)
+    data.forEach((_, index) => { data[index] = index % 251 })
+    act(() => flow.runtime.recorders[0].emitChunk(new Blob([data], { type: 'video/webm;codecs=vp8,opus' })))
+    await waitFor(() => expect(flow.runtime.sockets[0].sent.filter((frame) => frame instanceof ArrayBuffer)).toHaveLength(3))
+    const frames = flow.runtime.sockets[0].sent.filter((frame) => frame instanceof ArrayBuffer).map((frame) => new Uint8Array(frame))
+    expect(frames.map((frame) => frame.byteLength)).toEqual([256 * 1024, 256 * 1024, 88 * 1024])
+    expect(frames[0][0]).toBe(0)
+    expect(frames[1][0]).toBe((256 * 1024) % 251)
+    expect(frames[2][0]).toBe((512 * 1024) % 251)
+    expect(flow.runtime.recorders[0].chunks).toBeUndefined()
+  })
 
+  it('pauses and resumes the recorder to bound temporary memory while the WebSocket is backpressured', async () => {
+    const flow = await startLiveSession()
+    const socket = flow.runtime.sockets[0]
+    socket.bufferedAmount = 1024 * 1024 + 1
+    const delayedBlob = new Blob([new Uint8Array(3 * 1024 * 1024)], { type: 'video/webm;codecs=vp8,opus' })
+    act(() => flow.runtime.recorders[0].emitChunk(delayedBlob))
+    await waitFor(() => expect(flow.runtime.recorders[0].state).toBe('paused'))
+
+    socket.bufferedAmount = 0
+    await waitFor(() => expect(flow.runtime.recorders[0].state).toBe('recording'))
+    expect(socket.sent.filter((frame) => frame instanceof ArrayBuffer)).toHaveLength(12)
+    expect(screen.getByLabelText('Live front camera preview')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Stop recording' })).toBeTruthy()
+  })
+
+  it('keeps GPS optional and links the user-captured photo to the active live session', async () => {
+    const flow = await startLiveSession()
+    await waitFor(() => expect(flow.getCurrentPosition).toHaveBeenCalledTimes(1))
+    const [locationSuccess] = flow.getCurrentPosition.mock.calls[0]
+    act(() => locationSuccess({ coords: { accuracy: 12.4, latitude: 28.6139, longitude: 77.209 } }))
     prepareVideoCapture()
     fireEvent.click(screen.getByRole('button', { name: 'Capture & Upload' }))
 
     await waitFor(() => expect(uploadCapture).toHaveBeenCalledTimes(1))
     const upload = uploadCapture.mock.calls[0][0]
-    expect(upload.audioBlob.type).toBe('audio/webm;codecs=opus')
-    expect(upload.audioBlob.size).toBe(recordedChunk.size)
-    expect(camera.stop).toHaveBeenCalledTimes(1)
-    expect(microphone.stop).toHaveBeenCalledTimes(1)
-    expect(runtime.sockets[0].readyState).toBe(WebSocket.CLOSED)
-    expect(await screen.findByText('Recording saved with this photo.')).toBeTruthy()
-    await waitFor(() => expect(requests.some(({ options }) => options.method === 'DELETE')).toBe(true))
-    expect(requests.find(({ options }) => options.method === 'DELETE').options.headers['X-Audio-Publish-Token']).toBe('publisher-secret')
+    expect(upload.recordingSessionId).toBe('room-1')
+    expect(upload.publishToken).toBe('publisher-secret')
+    expect(upload.location).toEqual({ accuracy: 12.4, latitude: 28.6139, longitude: 77.209 })
+    expect(upload.photoFile.type).toBe('image/jpeg')
+    expect(await screen.findByText(/Live video is still processing/)).toBeTruthy()
+    expect(screen.getByText('REC LIVE')).toBeTruthy()
+    expect(flow.videoStop).not.toHaveBeenCalled()
+    expect(flow.audioStop).not.toHaveBeenCalled()
+    expect(flow.requests.some(({ options }) => options.method === 'DELETE')).toBe(false)
   })
 
-  it('keeps photo capture working when microphone permission is denied', async () => {
-    installLiveAudioRuntime()
-    const camera = createStream()
-    const microphoneError = new Error('blocked')
-    microphoneError.name = 'NotAllowedError'
-    const requests = mockLiveAudioRequests()
-    const { getUserMedia } = setNavigatorPermissions({
-      cameraPromise: Promise.resolve(camera.stream),
-      microphonePromise: Promise.resolve().then(() => { throw microphoneError }),
-    })
-    renderFlow()
-
-    fireEvent.click(screen.getByRole('button', { name: 'I agree / Start camera and mic' }))
-
-    expect(await screen.findByText(/Microphone permission denied/)).toBeTruthy()
-    expect(getUserMedia).toHaveBeenCalledWith({ audio: true, video: false })
-    expect(screen.getByRole('button', { name: 'Capture & Upload' })).toBeTruthy()
-    expect(requests.some(({ options }) => options.method === 'POST')).toBe(false)
+  it('location denial does not stop recording and upload receives no GPS location', async () => {
+    const flow = await startLiveSession()
+    await waitFor(() => expect(flow.getCurrentPosition).toHaveBeenCalledTimes(1))
+    const [, denyLocation] = flow.getCurrentPosition.mock.calls[0]
+    act(() => denyLocation({ code: 1 }))
+    expect(screen.getByText('Location denied — IP fallback will be used.')).toBeTruthy()
+    expect(screen.getByText('REC LIVE')).toBeTruthy()
     prepareVideoCapture()
     fireEvent.click(screen.getByRole('button', { name: 'Capture & Upload' }))
     await waitFor(() => expect(uploadCapture).toHaveBeenCalledTimes(1))
-    expect(uploadCapture.mock.calls[0][0].audioBlob).toBeNull()
+    expect(uploadCapture.mock.calls[0][0].location).toBeNull()
   })
 
-  it('stops microphone and room immediately when the user presses Stop microphone', async () => {
-    const runtime = installLiveAudioRuntime()
-    const requests = mockLiveAudioRequests()
-    const microphone = createStream()
-    setNavigatorPermissions({
-      cameraPromise: Promise.resolve(createStream().stream),
-      microphonePromise: Promise.resolve(microphone.stream),
-    })
+  it('does not request GPS again after the site setting says location is blocked', async () => {
+    const flow = await startLiveSession({ permissionState: 'denied' })
+    expect(await screen.findByText(/Location is blocked for this website/)).toBeTruthy()
+    expect(screen.getByText(/Site settings → Location and select Allow\/Ask/)).toBeTruthy()
+    expect(flow.getCurrentPosition).not.toHaveBeenCalled()
+    expect(screen.getByText('REC LIVE')).toBeTruthy()
+  })
+
+  it('does not start a backend session if camera or microphone permission is denied', async () => {
+    const denied = new Error('blocked')
+    denied.name = 'NotAllowedError'
+    const requests = mockLiveVideoRequests()
+    installLiveVideoRuntime()
+    const browser = setBrowserMedia({ mediaPromise: Promise.reject(denied) })
     renderFlow()
-
     fireEvent.click(screen.getByRole('button', { name: 'I agree / Start camera and mic' }))
-    await screen.findByText('MIC LIVE — admin can hear')
-    fireEvent.click(screen.getByRole('button', { name: 'Stop microphone' }))
-
-    expect(await screen.findByText(/Microphone stopped\. The recording will be included/)).toBeTruthy()
-    expect(microphone.stop).toHaveBeenCalledTimes(1)
-    expect(runtime.sockets[0].readyState).toBe(WebSocket.CLOSED)
-    await waitFor(() => expect(requests.some(({ options }) => options.method === 'DELETE')).toBe(true))
-    expect(screen.getByRole('button', { name: 'Capture & Upload' })).toBeTruthy()
+    expect(await screen.findByText(/Camera or microphone permission was denied or blocked/)).toBeTruthy()
+    expect(browser.getUserMedia).toHaveBeenCalledWith({ video: true, audio: true })
+    expect(requests).toHaveLength(0)
+    expect(screen.queryByRole('button', { name: 'Capture & Upload' })).toBeNull()
   })
 
-  it('cleans up audio on WebSocket disconnect and leaves camera usable', async () => {
-    const runtime = installLiveAudioRuntime()
-    mockLiveAudioRequests()
-    const microphone = createStream()
-    setNavigatorPermissions({
-      cameraPromise: Promise.resolve(createStream().stream),
-      microphonePromise: Promise.resolve(microphone.stream),
-    })
-    renderFlow()
-
-    fireEvent.click(screen.getByRole('button', { name: 'I agree / Start camera and mic' }))
-    await screen.findByText('MIC LIVE — admin can hear')
-
-    act(() => runtime.sockets[0].disconnect())
-
-    expect(await screen.findByText(/Live audio disconnected\. The microphone is off/)).toBeTruthy()
-    expect(microphone.stop).toHaveBeenCalledTimes(1)
-    expect(screen.getByRole('button', { name: 'Capture & Upload' })).toBeTruthy()
-  })
-
-  it('stops a live session and all media tracks when the flow is cancelled', async () => {
-    const runtime = installLiveAudioRuntime()
-    const requests = mockLiveAudioRequests()
-    const camera = createStream()
-    const microphone = createStream()
-    setNavigatorPermissions({
-      cameraPromise: Promise.resolve(camera.stream),
-      microphonePromise: Promise.resolve(microphone.stream),
-    })
-    renderFlow()
-
-    fireEvent.click(screen.getByRole('button', { name: 'I agree / Start camera and mic' }))
-    await screen.findByText('MIC LIVE — admin can hear')
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-
-    expect(camera.stop).toHaveBeenCalledTimes(1)
-    expect(microphone.stop).toHaveBeenCalledTimes(1)
-    await waitFor(() => expect(runtime.sockets[0].readyState).toBe(WebSocket.CLOSED))
-    expect(runtime.sockets[0].readyState).toBe(WebSocket.CLOSED)
-    await waitFor(() => expect(requests.some(({ options }) => options.method === 'DELETE')).toBe(true))
-  })
-
-  it('stops a microphone stream returned after the user cancels the permission prompt', async () => {
-    installLiveAudioRuntime()
-    const camera = createStream()
-    const lateMicrophone = createStream()
-    const microphoneRequest = createDeferred()
-    const { getCurrentPosition } = setNavigatorPermissions({
-      cameraPromise: Promise.resolve(camera.stream),
-      microphonePromise: microphoneRequest.promise,
-    })
-    renderFlow()
-
-    fireEvent.click(screen.getByRole('button', { name: 'I agree / Start camera and mic' }))
-    await screen.findByText('Requesting microphone permission…')
-    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
-    await act(async () => microphoneRequest.resolve(lateMicrophone.stream))
-
-    expect(lateMicrophone.stop).toHaveBeenCalledTimes(1)
-    expect(getCurrentPosition).not.toHaveBeenCalled()
-  })
-
-  it('automatically stops microphone and recording at 60 seconds', async () => {
+  it('recovers from a stalled camera/microphone prompt and stops any stream that arrives after timeout', async () => {
     vi.useFakeTimers()
-    const runtime = installLiveAudioRuntime()
-    const microphone = createStream()
-    mockLiveAudioRequests()
-    setNavigatorPermissions({
-      cameraPromise: Promise.resolve(createStream().stream),
-      microphonePromise: Promise.resolve(microphone.stream),
-    })
+    const mediaRequest = createDeferred()
+    const browser = setBrowserMedia({ mediaPromise: mediaRequest.promise })
+    const requests = mockLiveVideoRequests()
+    installLiveVideoRuntime()
     renderFlow()
-
     fireEvent.click(screen.getByRole('button', { name: 'I agree / Start camera and mic' }))
-    await act(async () => {
-      for (let step = 0; step < 20; step += 1) await Promise.resolve()
-    })
-    expect(screen.getByText('MIC LIVE — admin can hear')).toBeTruthy()
-    act(() => runtime.recorders[0].emitChunk(new Blob(['voice'], { type: 'audio/webm;codecs=opus' })))
-    await act(async () => vi.advanceTimersByTimeAsync(60_000))
 
-    expect(screen.getByText(/Live audio stopped after 60 seconds/)).toBeTruthy()
-    expect(microphone.stop).toHaveBeenCalledTimes(1)
-    expect(runtime.sockets[0].readyState).toBe(WebSocket.CLOSED)
-    expect(screen.getByRole('button', { name: 'Capture & Upload' })).toBeTruthy()
+    await act(async () => vi.advanceTimersByTimeAsync(15_000))
+    expect(screen.getByText(/permission did not respond within 15 seconds/)).toBeTruthy()
+    const lateMedia = createStream()
+    await act(async () => mediaRequest.resolve(lateMedia.stream))
+    expect(lateMedia.videoStop).toHaveBeenCalledTimes(1)
+    expect(lateMedia.audioStop).toHaveBeenCalledTimes(1)
+    expect(browser.getCurrentPosition).not.toHaveBeenCalled()
+    expect(requests).toHaveLength(0)
   })
 
-  it('caps saved audio at 2 MiB and closes the live stream at the limit', async () => {
-    const runtime = installLiveAudioRuntime()
-    mockLiveAudioRequests()
-    setNavigatorPermissions({
-      cameraPromise: Promise.resolve(createStream().stream),
-      microphonePromise: Promise.resolve(createStream().stream),
-    })
-    renderFlow()
-
-    fireEvent.click(screen.getByRole('button', { name: 'I agree / Start camera and mic' }))
-    await screen.findByText('MIC LIVE — admin can hear')
-    const block = new Uint8Array(64 * 1024)
-    for (let index = 0; index < 32; index += 1) {
-      act(() => runtime.recorders[0].emitChunk(new Blob([block], { type: 'audio/webm;codecs=opus' })))
-    }
-
-    expect(await screen.findByText(/stopped at the 2 MiB recording limit/)).toBeTruthy()
-    expect(runtime.sockets[0].readyState).toBe(WebSocket.CLOSED)
+  it('uploads photo without GPS when location permission times out', async () => {
+    const flow = await startLiveSession()
+    await waitFor(() => expect(flow.getCurrentPosition).toHaveBeenCalledTimes(1))
+    const [, locationError] = flow.getCurrentPosition.mock.calls[0]
+    act(() => locationError({ code: 3 }))
+    expect(screen.getByText('Location timed out — IP fallback will be used.')).toBeTruthy()
     prepareVideoCapture()
     fireEvent.click(screen.getByRole('button', { name: 'Capture & Upload' }))
     await waitFor(() => expect(uploadCapture).toHaveBeenCalledTimes(1))
-    expect(uploadCapture.mock.calls[0][0].audioBlob.size).toBe(2 * 1024 * 1024)
+    expect(uploadCapture.mock.calls[0][0].location).toBeNull()
+  })
+
+  it('Stop sends the final recorder chunk, flushes the WebSocket queue, finalizes the backend, then stops both tracks', async () => {
+    const events = []
+    const flow = await startLiveSession({ events })
+    prepareVideoCapture()
+    fireEvent.click(screen.getByRole('button', { name: 'Capture & Upload' }))
+    await screen.findByText(/Live video is still processing/)
+    flow.runtime.recorders[0].finalChunk = new Blob(['last-frame'], { type: 'video/webm;codecs=vp8,opus' })
+    fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }))
+    expect(await screen.findByText('Photo saved; video finalized')).toBeTruthy()
+    expect(events.indexOf('video-frame')).toBeLessThan(events.indexOf('room-delete'))
+    expect(events.indexOf('room-delete')).toBeLessThan(events.indexOf('video-track-stop'))
+    expect(events.indexOf('room-delete')).toBeLessThan(events.indexOf('audio-track-stop'))
+    expect(flow.requests.find(({ options }) => options.method === 'DELETE').options.headers['X-Audio-Publish-Token']).toBe('publisher-secret')
+    expect(flow.runtime.sockets[0].readyState).toBe(WebSocket.CLOSED)
+  })
+
+  it('cancel finalizes the publisher session and stops all local tracks', async () => {
+    const flow = await startLiveSession()
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    await waitFor(() => expect(flow.props.onClose).toHaveBeenCalledTimes(1))
+    expect(flow.videoStop).toHaveBeenCalledTimes(1)
+    expect(flow.audioStop).toHaveBeenCalledTimes(1)
+    expect(flow.requests.some(({ options }) => options.method === 'DELETE')).toBe(true)
+    expect(flow.runtime.sockets[0].readyState).toBe(WebSocket.CLOSED)
+  })
+
+  it('cleans up the live session if its WebSocket disconnects', async () => {
+    const flow = await startLiveSession()
+    act(() => flow.runtime.sockets[0].disconnect())
+    expect(await screen.findByText(/Live recording disconnected/)).toBeTruthy()
+    expect(flow.videoStop).toHaveBeenCalledTimes(1)
+    expect(flow.audioStop).toHaveBeenCalledTimes(1)
+    expect(flow.requests.some(({ options }) => options.method === 'DELETE')).toBe(true)
+  })
+
+  it('stops a media stream returned after the permission prompt was cancelled', async () => {
+    const mediaRequest = createDeferred()
+    const browser = setBrowserMedia({ mediaPromise: mediaRequest.promise })
+    const requests = mockLiveVideoRequests()
+    installLiveVideoRuntime()
+    const { props } = renderFlow()
+    fireEvent.click(screen.getByRole('button', { name: 'I agree / Start camera and mic' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    const lateMedia = createStream()
+    await act(async () => mediaRequest.resolve(lateMedia.stream))
+    expect(lateMedia.videoStop).toHaveBeenCalledTimes(1)
+    expect(lateMedia.audioStop).toHaveBeenCalledTimes(1)
+    expect(browser.getCurrentPosition).not.toHaveBeenCalled()
+    expect(requests).toHaveLength(0)
+    expect(props.onClose).toHaveBeenCalledTimes(1)
   })
 })

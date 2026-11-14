@@ -4,6 +4,7 @@ import {
   deleteAdminCapture,
   fetchAdminCaptureAudio,
   fetchAdminCapturePhoto,
+  fetchAdminCaptureVideo,
   fetchAdminCaptures,
   loginAdmin,
 } from './adminApi'
@@ -14,8 +15,8 @@ const knownDetailKeys = new Set([
   'id', 'captureId', 'fileName', 'originalFileName', 'contentType', 'fileSizeBytes',
   'width', 'height', 'latitude', 'longitude', 'accuracy', 'locationSource', 'source',
   'ipAddress', 'clientIp', 'address', 'city', 'region', 'country', 'userAgent',
-  'createdAt', 'saved', 'photoAvailable',
-  'audioAvailable',
+  'createdAt', 'saved', 'photoAvailable', 'audioAvailable', 'videoAvailable',
+  'videoSaved', 'videoReady', 'videoSizeBytes',
 ])
 
 function getCaptureId(capture) {
@@ -24,6 +25,10 @@ function getCaptureId(capture) {
 
 function getLocationSource(capture) {
   return capture?.locationSource ?? capture?.source ?? 'UNKNOWN'
+}
+
+function isCaptureVideoReady(capture) {
+  return capture?.videoReady === true || capture?.videoAvailable === true
 }
 
 function formatDate(value) {
@@ -80,10 +85,14 @@ function CaptureDetail({
   audioUrl,
   audioLoading,
   audioError,
+  videoUrl,
+  videoLoading,
+  videoError,
   deleteLoading,
   deleteError,
   onClose,
   onDelete,
+  onRefresh,
 }) {
   const [confirmDelete, setConfirmDelete] = useState(false)
   const extraDetails = Object.entries(capture).filter(([key]) => !knownDetailKeys.has(key))
@@ -139,6 +148,17 @@ function CaptureDetail({
               )}
               {capture.audioAvailable === true && !audioLoading && !audioError && !audioUrl && <p className="mt-2 text-sm text-emerald-100/50">Protected audio has not loaded.</p>}
             </div>
+            <div className="rounded-xl border border-emerald-400/15 bg-black/35 p-4">
+              <p className="text-[10px] uppercase tracking-[0.18em] text-emerald-400/60">Saved live video</p>
+              {isCaptureVideoReady(capture) && videoLoading && <p className="mt-2 animate-pulse text-sm text-emerald-300">Loading protected video…</p>}
+              {isCaptureVideoReady(capture) && videoError && <p className="mt-2 text-sm text-red-300">{videoError}</p>}
+              {isCaptureVideoReady(capture) && videoUrl && <video aria-label={`Saved live video for capture ${getCaptureId(capture)}`} className="mt-3 max-h-[60vh] w-full rounded-lg bg-black" controls playsInline preload="none" src={videoUrl} />}
+              {!isCaptureVideoReady(capture) && capture.videoSaved === true && <p className="mt-2 text-sm text-amber-200">Video processing — it is saved but not ready yet.</p>}
+              {!isCaptureVideoReady(capture) && capture.videoSaved === false && <p className="mt-2 text-sm text-emerald-100/50">No live video is attached to this capture.</p>}
+              {!isCaptureVideoReady(capture) && capture.videoSaved !== true && capture.videoSaved !== false && <p className="mt-2 text-sm text-amber-200">Video is not ready in the capture list yet.</p>}
+              {!isCaptureVideoReady(capture) && <button className="admin-button-secondary mt-3" onClick={onRefresh} type="button">Refresh video status</button>}
+              {isCaptureVideoReady(capture) && !videoLoading && !videoError && !videoUrl && <p className="mt-2 text-sm text-emerald-100/50">Protected video has not loaded.</p>}
+            </div>
           </div>
 
           <dl className="grid content-start gap-3 sm:grid-cols-2">
@@ -190,6 +210,9 @@ export default function AdminPortal({ onClose }) {
   const [audioUrl, setAudioUrl] = useState('')
   const [audioLoading, setAudioLoading] = useState(false)
   const [audioError, setAudioError] = useState('')
+  const [videoUrl, setVideoUrl] = useState('')
+  const [videoLoading, setVideoLoading] = useState(false)
+  const [videoError, setVideoError] = useState('')
   const [deleteLoading, setDeleteLoading] = useState(false)
   const [deleteError, setDeleteError] = useState('')
 
@@ -203,18 +226,26 @@ export default function AdminPortal({ onClose }) {
     setTotalPages(1)
     setSelectedCapture(null)
     setAudioUrl('')
+    setVideoUrl('')
     setDataError('')
   }, [])
 
-  const loadCaptures = useCallback(async (signal) => {
+  const loadCaptures = useCallback(async (signal, { quiet = false } = {}) => {
     if (!token) return
-    setDataLoading(true)
-    setDataError('')
+    if (!quiet) {
+      setDataLoading(true)
+      setDataError('')
+    }
 
     try {
       const payload = await fetchAdminCaptures({ token, page, size: pageSize, query, source, signal })
       const normalized = normalizeCapturePage(payload)
       setCaptures(normalized.content)
+      setSelectedCapture((current) => {
+        if (!current) return current
+        const updated = normalized.content.find((item) => getCaptureId(item) === getCaptureId(current))
+        return updated ? { ...current, ...updated } : current
+      })
       setSummary(normalized.summary)
       setTotalElements(normalized.totalElements)
       setTotalPages(normalized.totalPages)
@@ -227,7 +258,7 @@ export default function AdminPortal({ onClose }) {
       }
       setDataError(error.message || 'Capture records could not be loaded.')
     } finally {
-      if (!signal.aborted) setDataLoading(false)
+      if (!signal.aborted && !quiet) setDataLoading(false)
     }
   }, [logout, page, query, source, token])
 
@@ -299,6 +330,57 @@ export default function AdminPortal({ onClose }) {
       if (objectUrl) URL.revokeObjectURL(objectUrl)
     }
   }, [selectedCapture, token])
+
+  useEffect(() => {
+    if (!selectedCapture || !token || !isCaptureVideoReady(selectedCapture)) {
+      setVideoUrl('')
+      setVideoLoading(false)
+      setVideoError('')
+      return undefined
+    }
+
+    const controller = new AbortController()
+    let objectUrl = ''
+    setVideoLoading(true)
+    setVideoError('')
+    setVideoUrl('')
+
+    fetchAdminCaptureVideo({
+      token,
+      captureId: getCaptureId(selectedCapture),
+      signal: controller.signal,
+    })
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob)
+        setVideoUrl(objectUrl)
+      })
+      .catch((error) => {
+        if (error.name !== 'AbortError') setVideoError(error.message || 'Protected video could not be loaded.')
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setVideoLoading(false)
+      })
+
+    return () => {
+      controller.abort()
+      if (objectUrl) URL.revokeObjectURL(objectUrl)
+    }
+  }, [selectedCapture, token])
+
+  useEffect(() => {
+    if (!token || !captures.some((capture) => capture.videoSaved === true && !isCaptureVideoReady(capture))) return undefined
+    let controller = null
+    const refreshPendingVideos = () => {
+      controller?.abort()
+      controller = new AbortController()
+      void loadCaptures(controller.signal, { quiet: true })
+    }
+    const intervalId = window.setInterval(refreshPendingVideos, 5_000)
+    return () => {
+      window.clearInterval(intervalId)
+      controller?.abort()
+    }
+  }, [captures, loadCaptures, token])
 
   useEffect(() => {
     setDeleteLoading(false)
@@ -527,6 +609,7 @@ export default function AdminPortal({ onClose }) {
                       <th className="px-4 py-3">IP address</th>
                       <th className="px-4 py-3">File</th>
                       <th className="px-4 py-3">Audio</th>
+                      <th className="px-4 py-3">Video</th>
                       <th className="px-4 py-3">Action</th>
                     </tr>
                   </thead>
@@ -540,6 +623,7 @@ export default function AdminPortal({ onClose }) {
                         <td className="px-4 py-3 text-emerald-50/70">{capture.ipAddress ?? capture.clientIp ?? '—'}</td>
                         <td className="px-4 py-3 text-emerald-50/70">{formatBytes(capture.fileSizeBytes)}</td>
                         <td className="px-4 py-3">{capture.audioAvailable === true ? <span className="admin-chip">SAVED</span> : <span className="text-emerald-100/35">—</span>}</td>
+                        <td className="px-4 py-3">{isCaptureVideoReady(capture) ? <span className="admin-chip">READY</span> : capture.videoSaved === false ? <span className="text-emerald-100/35">—</span> : <span className="text-amber-200/70">PROCESSING</span>}</td>
                         <td className="px-4 py-3">
                           <button className="admin-link" onClick={() => setSelectedCapture(capture)} type="button">Inspect</button>
                         </td>
@@ -561,6 +645,7 @@ export default function AdminPortal({ onClose }) {
                     </div>
                     <p className="text-xs text-emerald-50/65">IP: {capture.ipAddress ?? capture.clientIp ?? 'Not recorded'}</p>
                     <p className="text-xs text-emerald-50/65">Audio: {capture.audioAvailable === true ? 'Saved recording available' : 'No recording'}</p>
+                    <p className="text-xs text-emerald-50/65">Video: {isCaptureVideoReady(capture) ? 'Ready to play' : capture.videoSaved === false ? 'No video attached' : 'Processing / not ready'}</p>
                     <button className="admin-button-primary w-full" onClick={() => setSelectedCapture(capture)} type="button">Inspect full record</button>
                   </article>
                 ))}
@@ -583,6 +668,7 @@ export default function AdminPortal({ onClose }) {
           deleteLoading={deleteLoading}
           onClose={() => setSelectedCapture(null)}
           onDelete={handleDeleteCapture}
+          onRefresh={() => loadCaptures(new AbortController().signal, { quiet: true })}
           photoError={photoError}
           photoLoading={photoLoading}
           photoUrl={photoUrl}
