@@ -83,7 +83,7 @@ export async function closeLiveAudioSession({ sessionId, publishToken, lastAckSe
         signal: controller.signal,
       })
 
-      if (response.ok || response.status === 404) return
+      if (response.ok) return
       if (response.status === 409 && attempt < 3) {
         await new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1)))
         continue

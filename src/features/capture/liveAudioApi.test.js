@@ -47,6 +47,15 @@ describe('closeLiveAudioSession', () => {
     expect(fetch.mock.calls[1][1].headers).toEqual(fetch.mock.calls[0][1].headers)
   })
 
+  it('does not treat HTTP 404 as successful finalization', async () => {
+    const fetch = vi.fn().mockResolvedValue(response(404))
+    vi.stubGlobal('fetch', fetch)
+
+    await expect(closeLiveAudioSession({ sessionId: 'room-404', publishToken: 'token-404', lastAckSequence: 1 }))
+      .rejects.toMatchObject({ status: 404, message: expect.stringContaining('HTTP 404') })
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
   it('explains HTTP 428 and refuses to issue DELETE without a valid sequence', async () => {
     const fetch = vi.fn().mockResolvedValue(response(428))
     vi.stubGlobal('fetch', fetch)
