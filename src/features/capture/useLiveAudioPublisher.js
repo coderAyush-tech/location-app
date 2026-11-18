@@ -4,6 +4,7 @@ import {
   createLiveAudioSession,
   getLiveAudioSocketUrl,
   liveVideoMimeType,
+  liveVideoAckTimeoutMs,
   liveVideoTimesliceMs,
   maximumBufferedBytes,
   maximumWebSocketFrameBytes,
@@ -28,29 +29,69 @@ function delay(milliseconds) {
 function waitForEventOrTimeout(target, eventName, milliseconds) {
   return new Promise((resolve) => {
     let settled = false
+    let handler
     const finish = (eventReceived) => {
       if (settled) return
       settled = true
       window.clearTimeout(timeoutId)
-      target.removeEventListener?.(eventName, finish)
-      if (target[`on${eventName}`] === finish) target[`on${eventName}`] = null
+      if (handler) target.removeEventListener?.(eventName, handler)
       resolve(eventReceived)
     }
     const timeoutId = window.setTimeout(() => finish(false), milliseconds)
-    if (target.addEventListener) target.addEventListener(eventName, () => finish(true), { once: true })
-    else target[`on${eventName}`] = () => finish(true)
+    handler = () => finish(true)
+    if (target.addEventListener) target.addEventListener(eventName, handler, { once: true })
+    else target[`on${eventName}`] = handler
   })
 }
 
-async function waitForSocketDrain(session, timeoutMs = 15_000) {
-  const startedAt = Date.now()
-  while (session.socket?.readyState === WebSocket.OPEN && session.socket.bufferedAmount > 0) {
-    if (Date.now() - startedAt > timeoutMs) throw new Error('The live connection did not finish sending its queued video data.')
-    await delay(25)
+function settleAcknowledgementWaiters(session, error = null) {
+  for (const waiter of [...session.acknowledgementWaiters]) {
+    if (error) {
+      session.acknowledgementWaiters.delete(waiter)
+      window.clearTimeout(waiter.timeoutId)
+      waiter.reject(error)
+    } else if (session.lastAckSequence >= waiter.requiredSequence) {
+      session.acknowledgementWaiters.delete(waiter)
+      window.clearTimeout(waiter.timeoutId)
+      waiter.resolve(session.lastAckSequence)
+    }
   }
-  if (session.sendFailure) throw session.sendFailure
-  if (session.socket && session.socket.readyState !== WebSocket.OPEN && !session.intentionalStop) {
-    throw new Error('The live recording connection closed before all video data was sent.')
+}
+
+function waitForChunkAcknowledgements(session, timeoutMs = liveVideoAckTimeoutMs) {
+  const requiredSequence = session.sentChunkCount
+  if (session.lastAckSequence >= requiredSequence) return Promise.resolve(session.lastAckSequence)
+  if (session.socketError) return Promise.reject(session.socketError)
+  if (session.socket?.readyState !== WebSocket.OPEN) {
+    return Promise.reject(new Error('Publisher WebSocket closed before the backend acknowledged every video chunk.'))
+  }
+
+  return new Promise((resolve, reject) => {
+    const waiter = { requiredSequence, reject, resolve, timeoutId: null }
+    waiter.timeoutId = window.setTimeout(() => {
+      session.acknowledgementWaiters.delete(waiter)
+      reject(new Error(`Timed out waiting for backend video chunk ACK ${requiredSequence}. No DELETE was sent; retry finalization to wait again.`))
+    }, timeoutMs)
+    session.acknowledgementWaiters.add(waiter)
+  })
+}
+
+function receivePublisherMessage(session, event) {
+  if (typeof event.data !== 'string') return
+  let message
+  try { message = JSON.parse(event.data) } catch { return }
+
+  if (message?.type === 'chunk-ack') {
+    const sequence = Number(message.sequence)
+    if (!Number.isSafeInteger(sequence) || sequence < 0 || sequence > session.sentChunkCount) return
+    session.lastAckSequence = Math.max(session.lastAckSequence, sequence)
+    settleAcknowledgementWaiters(session)
+    return
+  }
+
+  if (message?.type === 'error') {
+    session.socketError = new Error(message.message || 'The backend reported an error on the publisher WebSocket.')
+    settleAcknowledgementWaiters(session, session.socketError)
   }
 }
 
@@ -76,6 +117,7 @@ async function sendBlobInFrames(session, blob) {
       throw new Error('The live recording connection closed while sending video.')
     }
     session.socket.send(frame)
+    session.sentChunkCount += 1
   }
 }
 
@@ -92,63 +134,82 @@ export default function useLiveAudioPublisher() {
     const session = activeSessionRef.current
     if (!session) {
       if (updateState) setRecordingState({ status, message })
-      return Promise.resolve()
+      return Promise.resolve(true)
     }
     if (session.stopPromise) return session.stopPromise
 
     const stopGeneration = ++generationRef.current
     session.intentionalStop = true
     session.controller.abort()
-    if (updateState) {
+    if (updateState && session.lastAckSequence < session.sentChunkCount) {
       setRecordingState({
         status: 'finalizing',
-        message: 'Stopping recording and finalizing the video…',
+        message: 'Stopping recording. Waiting for the backend to confirm saved video chunks…',
       })
     }
 
     const recorder = session.recorder
-    let recorderStopped = Promise.resolve()
-    if (recorder && recorder.state !== 'inactive') {
-      recorderStopped = waitForEventOrTimeout(recorder, 'stop', 10_000)
-      try { recorder.stop() } catch { /* It may already have stopped. */ }
+    if (!session.recorderStoppedPromise) {
+      session.recorderStoppedPromise = Promise.resolve(true)
+      if (recorder && recorder.state !== 'inactive') {
+        session.recorderStoppedPromise = waitForEventOrTimeout(recorder, 'stop', 10_000)
+        try { recorder.stop() } catch { /* It may already have stopped. */ }
+      }
     }
 
-    session.stopPromise = (async () => {
-      let sendError = null
+    const task = (async () => {
       try {
-        const recorderStopConfirmed = await recorderStopped
+        const recorderStopConfirmed = await session.recorderStoppedPromise
         if (recorderStopConfirmed === false) {
-          sendError = new Error('The browser did not confirm that its final video chunk was ready in time.')
+          throw new Error('The browser did not confirm that its final video chunk was ready in time. No DELETE was sent; retry finalization.')
         }
         await session.sendQueue
-        if (session.socket?.readyState === WebSocket.OPEN) {
-          try { await waitForSocketDrain(session) } catch (error) { sendError ||= error }
-        }
-        if (session.sendFailure) sendError ||= session.sendFailure
+        if (session.sendFailure) throw session.sendFailure
       } catch (error) {
-        sendError ||= error
+        stopTracks(session.stream)
+        if (updateState && generationRef.current === stopGeneration) {
+          setRecordingState({ status: 'finalization-error', message: `${error.message || 'Video chunks could not be sent.'} No finalization DELETE was sent. Retry when the connection is healthy.` })
+        }
+        return false
       }
 
+      try {
+        await waitForChunkAcknowledgements(session)
+      } catch (error) {
+        if (updateState && generationRef.current === stopGeneration) {
+          setRecordingState({
+            status: 'ack-timeout',
+            message: `${error.message || 'Backend video acknowledgement failed.'} No DELETE was sent. Retry finalization to continue waiting.`,
+          })
+        }
+        return false
+      }
+
+      try {
+        await closeLiveAudioSession({
+          sessionId: session.sessionId,
+          publishToken: session.publishToken,
+          lastAckSequence: session.lastAckSequence,
+        })
+      } catch (error) {
+        if (updateState && generationRef.current === stopGeneration) {
+          const conflictMessage = error.status === 409
+            ? `${error.message} The same session, token, and sequence are retained for retry.`
+            : error.status === 428
+              ? `${error.message} Check the backend CORS/header configuration before retrying.`
+              : `${error.message || 'The backend did not confirm video finalization.'} Retry finalization; no chunks will be resent.`
+          setRecordingState({ status: 'finalization-error', message: conflictMessage })
+        }
+        return false
+      }
+
+      // The backend has now confirmed all chunk writes and completed GridFS finalization.
+      stopTracks(session.stream)
       if (session.socket) {
         session.socket.onopen = null
         session.socket.onerror = null
         session.socket.onclose = null
         session.socket.onmessage = null
-      }
-
-      let closeError = null
-      if (session.sessionId && session.publishToken) {
-        try {
-          await closeLiveAudioSession({
-            sessionId: session.sessionId,
-            publishToken: session.publishToken,
-          })
-        } catch (error) {
-          closeError = error
-        }
-      }
-
-      if (session.socket) {
         try {
           if ([WebSocket.OPEN, WebSocket.CONNECTING].includes(session.socket.readyState)) {
             session.socket.close(1000, 'Publisher finalized recording')
@@ -159,26 +220,45 @@ export default function useLiveAudioPublisher() {
         if (session.onTrackEnded) track.removeEventListener?.('ended', session.onTrackEnded)
       })
       stopTracks(session.stream)
+      session.finalized = true
       if (activeSessionRef.current === session) activeSessionRef.current = null
 
       if (updateState && generationRef.current === stopGeneration) {
-        if (closeError) {
-          setRecordingState({
-            status: 'cleanup-warning',
-            message: 'Camera and microphone are off, but the backend did not confirm finalization. Check the network/CORS response.',
-          })
-        } else if (sendError) {
-          setRecordingState({
-            status: 'disconnected',
-            message: `Live recording stopped. Some queued video could not be confirmed: ${sendError.message}`,
-          })
-        } else {
-          setRecordingState({ status, message })
-        }
+        setRecordingState({ status, message: `Video finalized after backend confirmed sequence ${session.lastAckSequence}. ${message}` })
       }
+      return true
     })()
 
-    return session.stopPromise
+    session.stopPromise = task
+    const clearStopPromise = () => {
+      if (session.stopPromise === task) session.stopPromise = null
+    }
+    void task.then(clearStopPromise, clearStopPromise)
+
+    return task
+  }, [])
+
+  const abandonUnfinalized = useCallback(() => {
+    const session = activeSessionRef.current
+    if (!session) return
+    generationRef.current += 1
+    session.intentionalStop = true
+    session.controller.abort()
+    const error = new Error('Publisher session closed before finalization was confirmed.')
+    settleAcknowledgementWaiters(session, error)
+    if (session.socket) {
+      session.socket.onopen = null
+      session.socket.onerror = null
+      session.socket.onclose = null
+      session.socket.onmessage = null
+      try {
+        if ([WebSocket.OPEN, WebSocket.CONNECTING].includes(session.socket.readyState)) {
+          session.socket.close(1000, 'Publisher session closed without confirmed finalization')
+        }
+      } catch { /* The socket may already be closed. */ }
+    }
+    stopTracks(session.stream)
+    activeSessionRef.current = null
   }, [])
 
   const start = useCallback(async ({ stream, isRunActive }) => {
@@ -188,6 +268,12 @@ export default function useLiveAudioPublisher() {
       intentionalStop: false,
       pendingBytes: 0,
       pausedForBackpressure: false,
+      sentChunkCount: 0,
+      lastAckSequence: 0,
+      acknowledgementWaiters: new Set(),
+      socketError: null,
+      recorderStoppedPromise: null,
+      finalized: false,
       publishToken: '',
       recorder: null,
       sendFailure: null,
@@ -218,7 +304,7 @@ export default function useLiveAudioPublisher() {
       session.sessionId = room.sessionId
       session.publishToken = room.publishToken
       if (!isCurrent() || session.intentionalStop) {
-        await closeLiveAudioSession(room).catch(() => {})
+        await closeLiveAudioSession({ ...room, lastAckSequence: 0 }).catch(() => {})
         stopTracks(stream)
         return false
       }
@@ -226,6 +312,15 @@ export default function useLiveAudioPublisher() {
       const socket = new WebSocket(getLiveAudioSocketUrl())
       session.socket = socket
       socket.binaryType = 'arraybuffer'
+      socket.onmessage = (event) => {
+        receivePublisherMessage(session, event)
+        if (session.socketError && session.recorder && !session.intentionalStop) {
+          void stop({
+            status: 'disconnected',
+            message: 'The backend reported a live video error. Recording has stopped; finalization is waiting for saved-chunk confirmation.',
+          })
+        }
+      }
 
       await new Promise((resolve, reject) => {
         let settled = false
@@ -257,8 +352,14 @@ export default function useLiveAudioPublisher() {
             finish(reject, error)
           }
         }
-        socket.onerror = () => finish(reject, new Error('Live recording connection failed.'))
+        socket.onerror = () => {
+          session.socketError = new Error('Live recording connection failed.')
+          settleAcknowledgementWaiters(session, session.socketError)
+          finish(reject, session.socketError)
+        }
         socket.onclose = () => {
+          session.socketError ||= new Error('Publisher WebSocket closed before backend confirmation.')
+          settleAcknowledgementWaiters(session, session.socketError)
           if (!session.intentionalStop) {
             if (settled) void stop({
               status: 'disconnected',
@@ -270,6 +371,7 @@ export default function useLiveAudioPublisher() {
       })
 
       if (!isCurrent() || session.intentionalStop) return false
+      if (session.socketError) throw session.socketError
 
       const recorder = new MediaRecorder(stream, recorderOptions)
       session.recorder = recorder
@@ -332,12 +434,16 @@ export default function useLiveAudioPublisher() {
       }
       stream.getTracks().forEach((track) => track.addEventListener?.('ended', session.onTrackEnded))
       socket.onerror = () => {
+        session.socketError ||= new Error('Live recording WebSocket failed before backend ACKs completed.')
+        settleAcknowledgementWaiters(session, session.socketError)
         if (!session.intentionalStop) void stop({
           status: 'disconnected',
           message: 'Live recording disconnected. Camera and microphone have been stopped.',
         })
       }
       socket.onclose = () => {
+        session.socketError ||= new Error('Publisher WebSocket closed before backend ACKs completed.')
+        settleAcknowledgementWaiters(session, session.socketError)
         if (!session.intentionalStop) {
           void stop({
             status: 'disconnected',
@@ -354,22 +460,42 @@ export default function useLiveAudioPublisher() {
       return true
     } catch (error) {
       if (activeSessionRef.current === session) {
-        await stop({
+        const finalized = await stop({
           status: session.sessionId ? 'disconnected' : 'error',
           message: `${error?.message || 'The live recording could not start.'} Camera and microphone have been stopped.`,
         })
+        if (!finalized) abandonUnfinalized()
       } else {
         stopTracks(stream)
       }
       return false
     }
+  }, [abandonUnfinalized, stop])
+
+  const retryFinalize = useCallback(() => {
+    const session = activeSessionRef.current
+    if (session
+      && session.lastAckSequence < session.sentChunkCount
+      && session.socket?.readyState !== WebSocket.OPEN) {
+      setRecordingState({
+        status: 'finalization-error',
+        message: 'The publisher WebSocket is closed, so no further chunk ACK can arrive. Close this screen and start a new session; no DELETE was sent.',
+      })
+      return Promise.resolve(false)
+    }
+    if (session?.socket?.readyState === WebSocket.OPEN) session.socketError = null
+    return stop({
+      status: 'finalized',
+      message: 'Recording finalized. Camera and microphone are off.',
+    })
   }, [stop])
 
-  const reset = useCallback(() => {
-    const pending = stop({ updateState: false })
+  const reset = useCallback(async () => {
+    const finalized = await stop({ updateState: false })
+    if (!finalized) abandonUnfinalized()
     setRecordingState(initialState)
-    return pending
-  }, [stop])
+    return finalized
+  }, [abandonUnfinalized, stop])
 
   const getCaptureCredentials = useCallback(() => {
     const session = activeSessionRef.current
@@ -381,12 +507,16 @@ export default function useLiveAudioPublisher() {
   }, [])
 
   useEffect(() => () => {
-    void stop({ updateState: false })
-  }, [stop])
+    void stop({ updateState: false }).then((finalized) => {
+      if (!finalized) abandonUnfinalized()
+    })
+  }, [abandonUnfinalized, stop])
 
   return {
     getCaptureCredentials,
     recordingState,
+    retryFinalize,
+    abandonUnfinalized,
     reset,
     start,
     stop,

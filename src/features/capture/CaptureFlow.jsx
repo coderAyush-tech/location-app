@@ -103,31 +103,41 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
       try { await pendingUpload } catch { /* Cancellation is expected here. */ }
     }
     if (hasActiveStream) {
-      setPhase('finalizing')
-      await liveVideo.stop({ status: 'stopped', message: 'Recording stopped and finalized. Camera and microphone are off.' })
+      const needsAckRetry = phase === 'finalizing' || ['ack-timeout', 'finalization-error'].includes(liveVideo.recordingState.status)
+      if (needsAckRetry) {
+        liveVideo.abandonUnfinalized()
+      } else {
+        setPhase('finalizing')
+        const finalized = await liveVideo.stop({ status: 'stopped', message: 'Recording stopped and finalized. Camera and microphone are off.' })
+        if (!finalized) liveVideo.abandonUnfinalized()
+      }
     }
     stopCamera()
     resetFlow()
     onClose()
-  }, [invalidateActiveRun, liveVideo.stop, onClose, resetFlow, stopCamera])
+  }, [invalidateActiveRun, liveVideo.abandonUnfinalized, liveVideo.recordingState.status, liveVideo.stop, onClose, phase, resetFlow, stopCamera])
 
   useEffect(() => {
     if (open) return undefined
     invalidateActiveRun()
     locationPermissionActiveRef.current = false
-    void liveVideo.stop({ updateState: false })
-    stopCamera()
+    void liveVideo.stop({ updateState: false }).then((finalized) => {
+      if (!finalized) liveVideo.abandonUnfinalized()
+      stopCamera()
+    })
     resetFlow()
     return undefined
-  }, [invalidateActiveRun, liveVideo.stop, open, resetFlow, stopCamera])
+  }, [invalidateActiveRun, liveVideo.abandonUnfinalized, liveVideo.stop, open, resetFlow, stopCamera])
 
   useEffect(() => () => {
     permissionRequestRef.current += 1
     cancelPendingCameraWait()
     uploadControllerRef.current?.abort()
-    void liveVideo.stop({ updateState: false })
-    stopTracks(streamRef.current)
-  }, [cancelPendingCameraWait, liveVideo.stop])
+    void liveVideo.stop({ updateState: false }).then((finalized) => {
+      if (!finalized) liveVideo.abandonUnfinalized()
+      stopTracks(streamRef.current)
+    })
+  }, [cancelPendingCameraWait, liveVideo.abandonUnfinalized, liveVideo.stop])
 
   useEffect(() => {
     if (!stream || !videoRef.current) return
@@ -412,10 +422,37 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
     }
     setStopPending(false)
     setPhase('finalizing')
-    await liveVideo.stop({ status: 'finalized', message: 'Video finalized. Camera and microphone are off.' })
-    stopCamera()
-    onStatusChange('Live video finalized')
-    setPhase('finished')
+    const finalized = await liveVideo.stop({ status: 'finalized', message: 'Video finalized. Camera and microphone are off.' })
+    if (finalized) {
+      stopCamera()
+      onStatusChange('Live video finalized')
+      setPhase('finished')
+    } else {
+      const currentStatus = liveVideo.recordingState.status
+      setErrorMessage('')
+      setPhase('finalization-error')
+      stopRequestedRef.current = false
+      onStatusChange(currentStatus === 'ack-timeout' ? 'Waiting for backend video ACK' : 'Video finalization needs retry')
+    }
+  }
+
+  const retryFinalization = async () => {
+    if (phase === 'finalizing') return
+    stopRequestedRef.current = true
+    setErrorMessage('Retrying backend ACK wait and finalization…')
+    setPhase('finalizing')
+    const finalized = await liveVideo.retryFinalize()
+    if (finalized) {
+      stopCamera()
+      setErrorMessage('')
+      setPhase('finished')
+      onStatusChange('Live video finalized')
+    } else {
+      setErrorMessage('')
+      setPhase('finalization-error')
+      stopRequestedRef.current = false
+      onStatusChange('Video finalization needs retry')
+    }
   }
 
   const startAgain = () => {
@@ -427,13 +464,20 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
   }
 
   useEffect(() => {
-    if (phase !== 'camera' || !['disconnected', 'error', 'unavailable', 'cleanup-warning'].includes(liveVideo.recordingState.status)) return
+    if (phase !== 'camera' || !['disconnected', 'error', 'unavailable', 'cleanup-warning', 'ack-timeout', 'finalization-error'].includes(liveVideo.recordingState.status)) return
     locationPermissionActiveRef.current = false
-    stopCamera()
     setErrorMessage(liveVideo.recordingState.message)
-    setCameraState({ status: 'unavailable', message: 'Live camera/microphone session ended.' })
-    setPhase('error')
-    onStatusChange('Live recording ended')
+    if (['ack-timeout', 'finalization-error'].includes(liveVideo.recordingState.status)) {
+      setStopPending(false)
+      stopRequestedRef.current = false
+      setPhase('finalization-error')
+      onStatusChange('Video finalization needs retry')
+    } else {
+      stopCamera()
+      setCameraState({ status: 'unavailable', message: 'Live camera/microphone session ended.' })
+      setPhase('error')
+      onStatusChange('Live recording ended')
+    }
   }, [liveVideo.recordingState.message, liveVideo.recordingState.status, onStatusChange, phase, stopCamera])
 
   if (!open) return null
@@ -491,11 +535,11 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
             </div>
           )}
 
-          {(phase === 'camera' || phase === 'finalizing') && (
+          {(phase === 'camera' || phase === 'finalizing' || phase === 'finalization-error') && (
             <div className="space-y-4">
               <div className="relative aspect-[4/3] overflow-hidden rounded-2xl bg-black">
                 <video aria-label="Live front camera preview" autoPlay className="h-full w-full -scale-x-100 object-cover" muted playsInline ref={videoRef} />
-                {(recordingIsLive || isFinalizing) && <span className={`absolute left-3 top-3 inline-flex items-center gap-2 rounded-full border bg-black/75 px-3 py-1.5 text-xs font-bold tracking-wider ${recordingIsLive ? 'border-rose-300/40 text-rose-200' : 'border-amber-300/40 text-amber-200'}`}><span aria-hidden="true" className={`h-2.5 w-2.5 animate-pulse rounded-full ${recordingIsLive ? 'bg-rose-400' : 'bg-amber-300'}`} />{recordingIsLive ? 'REC LIVE' : 'FINALIZING'}</span>}
+                {(recordingIsLive || isFinalizing || phase === 'finalization-error') && <span className={`absolute left-3 top-3 inline-flex items-center gap-2 rounded-full border bg-black/75 px-3 py-1.5 text-xs font-bold tracking-wider ${recordingIsLive ? 'border-rose-300/40 text-rose-200' : 'border-amber-300/40 text-amber-200'}`}><span aria-hidden="true" className={`h-2.5 w-2.5 animate-pulse rounded-full ${recordingIsLive ? 'bg-rose-400' : 'bg-amber-300'}`} />{recordingIsLive ? 'REC LIVE' : phase === 'finalization-error' ? 'ACK WAIT' : 'FINALIZING'}</span>}
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
@@ -507,7 +551,7 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
                   <span className="mt-1 block">{locationState.message}</span>
                 </div>
               </div>
-              <div aria-live={recordingIsLive ? 'assertive' : 'polite'} className={`flex flex-col gap-3 rounded-xl border px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between ${recordingIsLive ? 'border-rose-400/50 bg-rose-500/15 text-rose-100 shadow-[0_0_25px_rgba(244,63,94,.12)]' : ['error', 'disconnected', 'unavailable', 'cleanup-warning'].includes(liveVideo.recordingState.status) ? 'border-amber-400/30 bg-amber-400/10 text-amber-100' : 'border-white/10 bg-white/5 text-slate-200'}`} role="status">
+                <div aria-live={recordingIsLive ? 'assertive' : 'polite'} className={`flex flex-col gap-3 rounded-xl border px-4 py-3 text-sm sm:flex-row sm:items-center sm:justify-between ${recordingIsLive ? 'border-rose-400/50 bg-rose-500/15 text-rose-100 shadow-[0_0_25px_rgba(244,63,94,.12)]' : ['error', 'disconnected', 'unavailable', 'cleanup-warning', 'ack-timeout', 'finalization-error'].includes(liveVideo.recordingState.status) ? 'border-amber-400/30 bg-amber-400/10 text-amber-100' : 'border-white/10 bg-white/5 text-slate-200'}`} role="status">
                 <div className="flex items-center gap-3">
                   {recordingIsLive && <span aria-hidden="true" className="h-2.5 w-2.5 animate-pulse rounded-full bg-rose-400" />}
                   <div>
@@ -524,12 +568,27 @@ export default function CaptureFlow({ open, onClose, onStatusChange }) {
               </div>
               {stopPending && <p className="rounded-xl border border-amber-400/25 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">Finishing the still-photo save before stopping. Live recording stays visible during this step.</p>}
               {savedResult && <p className="rounded-xl border border-emerald-400/30 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">Photo saved and linked. {savedResult.videoReady === true ? 'Video is ready.' : 'Live video is still processing and will be finalized when you stop.'}{savedResult.id && <span className="mt-1 block break-all text-xs text-emerald-200/70">Capture ID: {savedResult.id}</span>}</p>}
-              {errorMessage && <p className="rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">{errorMessage}</p>}
+              {errorMessage && phase !== 'finalization-error' && <p className="rounded-xl border border-rose-400/30 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">{errorMessage}</p>}
               <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                 <button className="capture-button-secondary" disabled={isFinalizing} onClick={() => void closeFlow()} type="button">Cancel</button>
                 <button className="capture-button-primary" disabled={!recordingIsLive || uploading || Boolean(savedResult) || isFinalizing} onClick={captureAndUpload} type="button">
                   {uploading ? 'Saving photo…' : savedResult ? 'Photo saved' : capturedFile ? 'Retry photo upload' : 'Capture & Upload'}
                 </button>
+              </div>
+            </div>
+          )}
+
+          {phase === 'finalization-error' && (
+            <div className="space-y-5 py-5 text-center">
+              <div className="mx-auto grid h-16 w-16 place-items-center rounded-full bg-amber-400/15 text-3xl text-amber-200">!</div>
+              <div>
+                <h3 className="text-2xl font-semibold">Video finalization is waiting</h3>
+                <p aria-live="polite" className="mt-3 text-sm leading-6 text-amber-100">{liveVideo.recordingState.message || errorMessage}</p>
+                <p className="mt-2 text-xs leading-5 text-slate-400">The recorder has stopped, but the live preview and camera/microphone tracks stay on until finalization is confirmed or you close this screen. The backend DELETE is sent only after every binary chunk has a server ACK. Continue waiting or retry with the same session and sequence.</p>
+              </div>
+              <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-center">
+                <button className="capture-button-secondary" onClick={() => void closeFlow()} type="button">Close</button>
+                <button className="capture-button-primary" onClick={() => void retryFinalization()} type="button">Continue / Retry finalization</button>
               </div>
             </div>
           )}

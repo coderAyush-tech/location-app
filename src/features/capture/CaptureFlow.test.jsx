@@ -40,7 +40,7 @@ function createStream(events = []) {
   }
 }
 
-function installLiveVideoRuntime(events = []) {
+function installLiveVideoRuntime(events = [], { autoAck = true } = {}) {
   const sockets = []
   const recorders = []
 
@@ -55,6 +55,7 @@ function installLiveVideoRuntime(events = []) {
       this.readyState = MockWebSocket.CONNECTING
       this.bufferedAmount = 0
       this.sent = []
+      this.binarySentCount = 0
       sockets.push(this)
       queueMicrotask(() => {
         if (this.readyState !== MockWebSocket.CONNECTING) return
@@ -65,8 +66,17 @@ function installLiveVideoRuntime(events = []) {
 
     send(value) {
       this.sent.push(value)
-      if (value instanceof ArrayBuffer) events.push('video-frame')
+      if (value instanceof ArrayBuffer) {
+        this.binarySentCount += 1
+        events.push('video-frame')
+        if (autoAck) {
+          const sequence = this.binarySentCount
+          queueMicrotask(() => this.emitText({ type: 'chunk-ack', sequence }))
+        }
+      }
     }
+
+    emitText(message) { this.onmessage?.({ data: JSON.stringify(message) }) }
 
     close() {
       if (this.readyState === MockWebSocket.CLOSED) return
@@ -155,8 +165,8 @@ function renderFlow(overrides = {}) {
   return { ...render(<CaptureFlow {...props} />), props }
 }
 
-async function startLiveSession({ permissionState = 'prompt', events = [] } = {}) {
-  const runtime = installLiveVideoRuntime(events)
+async function startLiveSession({ permissionState = 'prompt', events = [], autoAck = true } = {}) {
+  const runtime = installLiveVideoRuntime(events, { autoAck })
   const requests = mockLiveVideoRequests(events)
   const media = createStream(events)
   const browser = setBrowserMedia({ mediaPromise: Promise.resolve(media.stream), permissionState })
@@ -353,7 +363,7 @@ describe('consented unlimited live camera and microphone flow', () => {
     expect(uploadCapture.mock.calls[0][0].location).toBeNull()
   })
 
-  it('Stop sends the final recorder chunk, flushes the WebSocket queue, finalizes the backend, then stops both tracks', async () => {
+  it('Stop sends the final recorder chunk, waits for its server ACK, sends sequence headers, then stops tracks', async () => {
     const events = []
     const flow = await startLiveSession({ events })
     prepareVideoCapture()
@@ -365,8 +375,90 @@ describe('consented unlimited live camera and microphone flow', () => {
     expect(events.indexOf('video-frame')).toBeLessThan(events.indexOf('room-delete'))
     expect(events.indexOf('room-delete')).toBeLessThan(events.indexOf('video-track-stop'))
     expect(events.indexOf('room-delete')).toBeLessThan(events.indexOf('audio-track-stop'))
-    expect(flow.requests.find(({ options }) => options.method === 'DELETE').options.headers['X-Audio-Publish-Token']).toBe('publisher-secret')
+    const deletion = flow.requests.find(({ options }) => options.method === 'DELETE')
+    expect(deletion.options.headers['X-Audio-Publish-Token']).toBe('publisher-secret')
+    expect(deletion.options.headers['X-Audio-Last-Chunk-Sequence']).toBe('1')
+    expect(flow.runtime.sockets[0].binarySentCount).toBe(1)
     expect(flow.runtime.sockets[0].readyState).toBe(WebSocket.CLOSED)
+  })
+
+  it('does not treat bufferedAmount zero as backend-save confirmation; it waits for chunk-ack before DELETE', async () => {
+    const flow = await startLiveSession({ autoAck: false })
+    const socket = flow.runtime.sockets[0]
+    act(() => flow.runtime.recorders[0].emitChunk(new Blob(['video'], { type: 'video/webm;codecs=vp8,opus' })))
+    await waitFor(() => expect(socket.binarySentCount).toBe(1))
+    socket.bufferedAmount = 0
+
+    fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }))
+    expect(await screen.findByText(/Waiting for the backend to confirm saved video chunks/)).toBeTruthy()
+    expect(flow.requests.some(({ options }) => options.method === 'DELETE')).toBe(false)
+    expect(flow.videoStop).not.toHaveBeenCalled()
+    expect(screen.queryByRole('button', { name: 'Continue / Retry finalization' })).toBeNull()
+
+    act(() => socket.emitText({ type: 'chunk-ack', sequence: 1 }))
+    expect(await screen.findByText('Recording stopped and finalized')).toBeTruthy()
+    const deletion = flow.requests.find(({ options }) => options.method === 'DELETE')
+    expect(deletion.options.headers['X-Audio-Last-Chunk-Sequence']).toBe('1')
+    expect(flow.videoStop).toHaveBeenCalledTimes(1)
+  })
+
+  it('sends sequence zero when no binary video chunk was sent', async () => {
+    const flow = await startLiveSession()
+    fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }))
+    expect(await screen.findByText('Recording stopped and finalized')).toBeTruthy()
+    const deletion = flow.requests.find(({ options }) => options.method === 'DELETE')
+    expect(deletion.options.headers['X-Audio-Last-Chunk-Sequence']).toBe('0')
+    expect(flow.runtime.sockets[0].binarySentCount).toBe(0)
+  })
+
+  it('shows retry/continue after ACK timeout and sends DELETE only after the late ACK arrives', async () => {
+    const flow = await startLiveSession({ autoAck: false })
+    const socket = flow.runtime.sockets[0]
+    act(() => flow.runtime.recorders[0].emitChunk(new Blob(['video'], { type: 'video/webm;codecs=vp8,opus' })))
+    await waitFor(() => expect(socket.binarySentCount).toBe(1))
+    vi.useFakeTimers()
+    fireEvent.click(screen.getByRole('button', { name: 'Stop recording' }))
+
+    await act(async () => vi.advanceTimersByTimeAsync(15_000))
+    expect(screen.getByRole('heading', { name: 'Video finalization is waiting' })).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Continue / Retry finalization' })).toBeTruthy()
+    expect(flow.requests.some(({ options }) => options.method === 'DELETE')).toBe(false)
+    expect(flow.videoStop).not.toHaveBeenCalled()
+
+    await act(async () => {
+      socket.emitText({ type: 'chunk-ack', sequence: 1 })
+      fireEvent.click(screen.getByRole('button', { name: 'Continue / Retry finalization' }))
+      for (let index = 0; index < 10; index += 1) await Promise.resolve()
+    })
+    expect(screen.getByText('Recording stopped and finalized')).toBeTruthy()
+    const deletion = flow.requests.find(({ options }) => options.method === 'DELETE')
+    expect(deletion.options.headers['X-Audio-Last-Chunk-Sequence']).toBe('1')
+    expect(flow.videoStop).toHaveBeenCalledTimes(1)
+  })
+
+  it('stops on a backend WebSocket error and never DELETEs without confirmed chunk ACKs', async () => {
+    const flow = await startLiveSession({ autoAck: false })
+    const socket = flow.runtime.sockets[0]
+    act(() => flow.runtime.recorders[0].emitChunk(new Blob(['video'], { type: 'video/webm;codecs=vp8,opus' })))
+    await waitFor(() => expect(socket.binarySentCount).toBe(1))
+
+    act(() => socket.emitText({ type: 'error', message: 'GridFS append failed' }))
+
+    expect(await screen.findByRole('heading', { name: 'Video finalization is waiting' })).toBeTruthy()
+    expect(screen.getAllByText(/GridFS append failed/).length).toBeGreaterThan(0)
+    expect(flow.runtime.recorders[0].state).toBe('inactive')
+    expect(flow.requests.some(({ options }) => options.method === 'DELETE')).toBe(false)
+    expect(screen.getByRole('button', { name: 'Continue / Retry finalization' })).toBeTruthy()
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Continue / Retry finalization' }))
+      await Promise.resolve()
+      socket.emitText({ type: 'chunk-ack', sequence: 1 })
+      for (let index = 0; index < 10; index += 1) await Promise.resolve()
+    })
+    expect(screen.getByText('Recording stopped and finalized')).toBeTruthy()
+    const deletion = flow.requests.find(({ options }) => options.method === 'DELETE')
+    expect(deletion.options.headers['X-Audio-Last-Chunk-Sequence']).toBe('1')
   })
 
   it('cancel finalizes the publisher session and stops all local tracks', async () => {
@@ -379,13 +471,14 @@ describe('consented unlimited live camera and microphone flow', () => {
     expect(flow.runtime.sockets[0].readyState).toBe(WebSocket.CLOSED)
   })
 
-  it('cleans up the live session if its WebSocket disconnects', async () => {
+  it('finalizes a zero-chunk recording with sequence zero after its WebSocket disconnects', async () => {
     const flow = await startLiveSession()
     act(() => flow.runtime.sockets[0].disconnect())
     expect(await screen.findByText(/Live recording disconnected/)).toBeTruthy()
     expect(flow.videoStop).toHaveBeenCalledTimes(1)
     expect(flow.audioStop).toHaveBeenCalledTimes(1)
-    expect(flow.requests.some(({ options }) => options.method === 'DELETE')).toBe(true)
+    const deletion = flow.requests.find(({ options }) => options.method === 'DELETE')
+    expect(deletion.options.headers['X-Audio-Last-Chunk-Sequence']).toBe('0')
   })
 
   it('stops a media stream returned after the permission prompt was cancelled', async () => {

@@ -4,6 +4,7 @@ export const liveVideoMimeType = 'video/webm;codecs=vp8,opus'
 export const liveVideoTimesliceMs = 500
 export const maximumWebSocketFrameBytes = 256 * 1024
 export const maximumBufferedBytes = 1024 * 1024
+export const liveVideoAckTimeoutMs = 15_000
 
 function responseMessage(payload, fallback) {
   return payload?.message || payload?.detail || payload?.title || fallback
@@ -60,25 +61,41 @@ export async function createLiveAudioSession({ signal } = {}) {
   }
 }
 
-export async function closeLiveAudioSession({ sessionId, publishToken }) {
+export async function closeLiveAudioSession({ sessionId, publishToken, lastAckSequence }) {
   if (!sessionId || !publishToken) return
+  if (!Number.isSafeInteger(lastAckSequence) || lastAckSequence < 0) {
+    throw new Error('A valid last acknowledged video sequence is required to finalize this recording.')
+  }
 
   const controller = new AbortController()
   const timeoutId = window.setTimeout(() => controller.abort(), 15_000)
   try {
-    const response = await fetch(apiUrl(`/api/v1/live-audio/sessions/${encodeURIComponent(sessionId)}`), {
-      method: 'DELETE',
-      headers: {
-        Accept: 'application/json',
-        'X-Audio-Publish-Token': publishToken,
-      },
-      cache: 'no-store',
-      keepalive: true,
-      signal: controller.signal,
-    })
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const response = await fetch(apiUrl(`/api/v1/live-audio/sessions/${encodeURIComponent(sessionId)}`), {
+        method: 'DELETE',
+        headers: {
+          Accept: 'application/json',
+          'X-Audio-Publish-Token': publishToken,
+          'X-Audio-Last-Chunk-Sequence': String(lastAckSequence),
+        },
+        cache: 'no-store',
+        keepalive: true,
+        signal: controller.signal,
+      })
 
-    if (!response.ok && response.status !== 404) {
-      throw new Error('The live recording session could not be finalized cleanly.')
+      if (response.ok || response.status === 404) return
+      if (response.status === 409 && attempt < 3) {
+        await new Promise((resolve) => window.setTimeout(resolve, 250 * (attempt + 1)))
+        continue
+      }
+
+      const error = new Error(response.status === 428
+        ? 'The backend rejected finalization because X-Audio-Last-Chunk-Sequence was missing (428).'
+        : response.status === 409
+          ? 'The backend still reports a chunk-sequence conflict (409). Retry finalization with the same session and sequence.'
+          : `The live recording session could not be finalized (HTTP ${response.status}).`)
+      error.status = response.status
+      throw error
     }
   } catch (error) {
     if (error.name === 'AbortError') throw new Error('Finalizing the live recording timed out.')
